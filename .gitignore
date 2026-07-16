@@ -1,0 +1,11 @@
+build/
+.DS_Store
+*.dSYM/
+*.log
+*.bin
+!tests/images/*.bin
+*.elf
+!tests/images/*.elf
+*.img
+!tests/images/*.img
+*.o

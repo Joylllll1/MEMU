@@ -1,0 +1,4 @@
+/bin/fs-cat bin/fs-cat.bin
+/bin/fs-missing bin/fs-missing.bin
+/bin/fs-devices bin/fs-devices.bin
+/share/message.txt share/message.txt
