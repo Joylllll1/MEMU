@@ -204,8 +204,13 @@ git log --oneline --decorate -5
 Expected remote:
 
 ```text
+git@github.com:Joylllll1/MEMU.git
 https://github.com/Joylllll1/MEMU.git
 ```
+
+The current checkout uses the SSH URL. On another device, use SSH if a
+GitHub key is configured; otherwise use the HTTPS URL after `gh auth login` or
+another credential helper is configured.
 
 The complete initial MEMU scaffold and this handoff file are committed on
 `main`. Do not push the stale `/Users/wjl/Documents/MEMU` copy.
