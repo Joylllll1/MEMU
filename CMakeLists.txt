@@ -19,6 +19,7 @@ add_executable(memu
   src/monitor/monitor.c
   src/monitor/watchpoint.c
   src/memory/memory.c
+  src/memory/mmu.c
   src/cpu/cpu.c
   src/isa/rv32i.c
 )

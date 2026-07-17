@@ -99,6 +99,8 @@ static uint32_t rem32(int32_t lhs, int32_t rhs) {
 
 static const char *csr_name(uint32_t csr) {
   switch (csr) {
+    case 0x180:
+      return "satp";
     case 0x300:
       return "mstatus";
     case 0x305:
@@ -123,6 +125,9 @@ static const char *csr_name(uint32_t csr) {
 static bool csr_read(const MEMU *memu, uint32_t csr, uint32_t *value) {
   const CPUState *cpu = &memu->cpu;
   switch (csr) {
+    case 0x180:
+      *value = cpu->satp;
+      return true;
     case 0x300:
       *value = cpu->mstatus;
       return true;
@@ -153,6 +158,9 @@ static bool csr_read(const MEMU *memu, uint32_t csr, uint32_t *value) {
 static bool csr_write(MEMU *memu, uint32_t csr, uint32_t value) {
   CPUState *cpu = &memu->cpu;
   switch (csr) {
+    case 0x180:
+      cpu->satp = value;
+      return true;
     case 0x300:
       cpu->mstatus = value;
       return true;
@@ -507,6 +515,8 @@ void rv32i_exec_once(MEMU *memu) {
         }
       } else if (inst == UINT32_C(0x30200073)) {
         dnpc = cpu->mepc;
+      } else if ((inst & UINT32_C(0xfe007fff)) == UINT32_C(0x12000073)) {
+        // sfence.vma: no TLB, page tables are walked on every access
       } else if (f3 != 0) {
         exec_csr(memu, inst, this_pc, f3, rd_idx, rs1_idx);
       } else {

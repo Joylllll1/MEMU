@@ -1,6 +1,7 @@
 #include "memu/memory.h"
 
 #include "memu/device.h"
+#include "memu/mmu.h"
 
 #include <string.h>
 
@@ -71,6 +72,17 @@ void memory_init(void) {
 }
 
 uint32_t mem_read(uint32_t addr, int len) {
+  if (mmu_active()) {
+    if ((addr & 0xfffu) + (uint32_t)len > 0x1000u) {
+      uint32_t value = 0;
+      for (int i = 0; i < len; i++) {
+        value |= (mem_read(addr + (uint32_t)i, 1) & 0xffu) << (8 * i);
+      }
+      return value;
+    }
+    addr = mmu_translate(addr, MMU_ACCESS_LOAD);
+  }
+
   if (addr >= MEMU_MEM_BASE) {
     uint64_t off64 = (uint64_t)addr - MEMU_MEM_BASE;
     if (off64 + (uint64_t)len <= MEMU_MEM_SIZE) {
@@ -87,6 +99,16 @@ uint32_t mem_read(uint32_t addr, int len) {
 }
 
 void mem_write(uint32_t addr, int len, uint32_t data) {
+  if (mmu_active()) {
+    if ((addr & 0xfffu) + (uint32_t)len > 0x1000u) {
+      for (int i = 0; i < len; i++) {
+        mem_write(addr + (uint32_t)i, 1, (data >> (8 * i)) & 0xffu);
+      }
+      return;
+    }
+    addr = mmu_translate(addr, MMU_ACCESS_STORE);
+  }
+
   if (addr >= MEMU_MEM_BASE) {
     uint64_t off64 = (uint64_t)addr - MEMU_MEM_BASE;
     if (off64 + (uint64_t)len <= MEMU_MEM_SIZE) {
@@ -104,7 +126,9 @@ void mem_write(uint32_t addr, int len, uint32_t data) {
 }
 
 uint32_t inst_fetch(uint32_t pc) {
-  MEMU_ASSERT(mem_in_range(pc, 4),
-              "instruction fetch out of range: pc=0x%08x", pc);
-  return pmem_read((size_t)((uint64_t)pc - MEMU_MEM_BASE), 4);
+  uint32_t paddr = mmu_active() ? mmu_translate(pc, MMU_ACCESS_FETCH) : pc;
+  MEMU_ASSERT(mem_in_range(paddr, 4),
+              "instruction fetch out of range: pc=0x%08x paddr=0x%08x",
+              pc, paddr);
+  return pmem_read((size_t)((uint64_t)paddr - MEMU_MEM_BASE), 4);
 }

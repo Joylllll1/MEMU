@@ -18,6 +18,7 @@ typedef struct {
   uint32_t mscratch;
   uint32_t mepc;
   uint32_t mcause;
+  uint32_t satp;
 } CPUState;
 
 typedef struct {

@@ -2,6 +2,7 @@
 
 #include "memu/device.h"
 #include "memu/memory.h"
+#include "memu/mmu.h"
 #include "memu/watchpoint.h"
 
 #include <string.h>
@@ -38,6 +39,7 @@ void memu_init(MEMU *memu) {
     .iringbuf_pos = 0,
     .iringbuf_count = 0,
   };
+  mmu_set_cpu(&memu->cpu);
 }
 
 static bool maybe_timer_interrupt(MEMU *memu) {
@@ -56,6 +58,7 @@ static bool maybe_timer_interrupt(MEMU *memu) {
 }
 
 void cpu_exec(MEMU *memu, uint64_t max_instr) {
+  mmu_set_cpu(&memu->cpu);
   uint64_t executed = 0;
   while (memu->state == MEMU_STATE_RUNNING && executed < max_instr) {
     if (!maybe_timer_interrupt(memu)) {
