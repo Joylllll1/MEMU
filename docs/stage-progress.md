@@ -37,10 +37,12 @@ changes.
 - Active strict gate: FCEUX bounded execution passes with public `nestest.nes`
   under `/Users/wjl/Projects/icspa2025/ICS-PA/fceux-am/nes/rom/`; the historical
   PA Box download URL currently returns a login page.
-- Full PA3 remains active work: Nanos/Navy now has the minimal direct-syscall
-  hello-to-dummy smoke, an official Navy libc/newlib hello smoke, and a bounded
-  official NSlider first-frame render through NDL/miniSDL. NDL interaction,
-  real slide assets, PAL, and multi-program Nanos-lite behavior remain.
+- Full PA3 now substantially complete: Nanos/Navy has the minimal
+  direct-syscall hello-to-dummy smoke, official Navy libc/newlib hello smoke,
+  NSlider multi-slide navigation with real generated slide assets and keyboard
+  injection, standalone NDL draw/event/timer test, Flappy Bird miniSDL game
+  running under batch mode, and execve-style program replacement. PAL and
+  interactive SDL input for Navy apps remain future work.
 - The full libc smoke uses downloaded compiler-rt/newlib sources and excludes
   three riscv32-incompatible newlib sources in the temporary tree:
   `getpass.c`, `stat64r.c`, and `wcwidth.c`.
@@ -81,7 +83,7 @@ LiteNES/Mario status: pass for bounded bundled Mario ROM render/FPS; SDL path ad
 FCEUX status: pass for bounded execution of public `nestest.nes`; the official
 PA Box URL currently returns a login page rather than the historical archive
 yield-os/thread-os status: pass for real am-kernels CTE/context-switch smoke
-Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, and the bounded NSlider first-frame smoke under real Nanos-lite pass; full NDL/miniSDL interaction remains active work
+Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL remains not-started
 ```
 
 ## Stage 0 Verification
@@ -304,11 +306,15 @@ Nanos-lite SYS_exit to next program: pass for hello -> dummy
 Full Navy libc/newlib/compiler-rt hello path: pass through `make pa-nanos-libc-test`;
 the temporary compatibility patch excludes `getpass.c`, `stat64r.c`, and
 `wcwidth.c` for riscv32
-NSlider first-frame NDL/miniSDL smoke: pass through `make pa-navy-ndl-test`;
-the bounded run uses placeholder slide copies and does not verify keyboard navigation
-NDL draw app: not-started
-Full miniSDL interaction, Flappy Bird, and PAL: not-started
-Nanos-lite execve-style program replacement: not-started
+NSlider multi-slide navigation: pass through `make pa-navy-ndl-test`; real
+generated slides plus `--key-events` injection verify slide transitions with
+different framebuffer checksums
+NDL draw app: pass through `make pa-ndl-test`; standalone test exercises
+NDL_Init/OpenCanvas/DrawRect/GetTicks/PollEvent/Quit
+Flappy Bird miniSDL game: pass through `make pa-bird-test`; PNG sprites load
+via stb_image IMG_Load and the game runs 50M instructions without crashing
+Nanos-lite execve-style program replacement: pass through `make pa-execve-test`
+PAL: not-started
 ```
 
 ## CTE OS Smoke
@@ -487,10 +493,10 @@ cmake --build /private/tmp/memu-stage7-cmake
 ctest --test-dir /private/tmp/memu-stage7-cmake --output-on-failure
 ```
 
-Strict NEMU status: not complete. Real Navy libc and NSlider artifacts have
-been run; NSlider reaches a bounded first-frame render, but the required
-interactive navigation and real slide assets are not verified. Flappy Bird and
-PAL remain unrun. These results do not replace full Navy/NDL/miniSDL coverage.
+Strict NEMU status: PA3 Navy/NDL/miniSDL coverage now includes real Navy libc
+hello, NSlider multi-slide navigation with generated slides and key injection,
+the standalone NDL test, Flappy Bird with PNG sprite loading, and execve
+program replacement. PAL remains unrun and is the outstanding PA3 gap.
 
 The Stage 7 smoke artifacts are:
 
@@ -667,9 +673,10 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   computation result.
 - `ebreak` records `pc` as the trap instruction address, not the following PC.
 - PA2 is recorded as pass with the public FCEUX test ROM. PA3 real
-  Nanos-lite/Navy progress has direct-syscall hello-to-dummy and official Navy
-  libc/newlib hello passes, plus a bounded NSlider first-frame render through
-  NDL/miniSDL; interactive NDL/Navy app coverage is still active work.
+  Nanos-lite/Navy progress has direct-syscall hello-to-dummy, official Navy
+  libc/newlib hello, NSlider multi-slide navigation, the standalone NDL test,
+  Flappy Bird, and execve program replacement passes; PAL is the remaining
+  PA3 app target.
 - Real NEMU `am-tests` and graphics apps are still compatibility targets; the
   current Stage 5 package provides MEMU-local device fixtures and host-visible
   checksum/trace validation.
@@ -678,9 +685,9 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   now validates one real Nanos-lite + Navy hello-to-dummy smoke.
 - Real Navy-apps/miniSDL remain compatibility targets; the current Stage 7
   package provides MEMU-local ramdisk, fd, special-file, and fs-loader fixtures.
-  The local checkout now has `navy-apps`, the official libc/newlib hello path
-  passes, and NSlider reaches a bounded first-frame render through NDL/miniSDL;
-  interactive NDL/miniSDL programs remain future work.
+  The local checkout now has `navy-apps`; the official libc/newlib hello,
+  NSlider multi-slide navigation, standalone NDL test, and Flappy Bird paths
+  all pass through real NDL/miniSDL; PAL remains future work.
 - `toolchain-basic.elf` is a real cross-compiled RV32 ELF smoke test, but it is
   not a substitute for AM `cpu-tests`, AM IOE tests, LiteNES, or Mario.
 - New sessions should verify the current tree before implementing the next

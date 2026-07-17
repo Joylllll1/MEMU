@@ -20,7 +20,7 @@ Current strict summary:
 ```text
 Local scaffold implemented through: Stage 7
 NEMU-aligned complete through: Stage 5 AM app smoke gate
-Active gate: PA2 FCEUX bounded execution passes with a public NES test ROM; PA3 real Navy libc hello and a bounded NSlider first-frame render pass, while full NDL/miniSDL interaction remains active work.
+Active gate: PA2 FCEUX bounded execution passes with a public NES test ROM; PA3 real Navy libc hello, NSlider multi-slide navigation, Flappy Bird, and execve program replacement pass; PAL remains not-started.
 ```
 
 | Program | Layer | Status | Last Run | Notes |
@@ -58,9 +58,10 @@ Active gate: PA2 FCEUX bounded execution passes with a public NES test ROM; PA3 
 | Nanos-lite + Navy hello/dummy batch (direct syscall) | OS/Navy | pass | 2026-07-15 | `make pa-nanos-tests BUILD_DIR=/private/tmp/memu-pa-nanos-batch`; cloned real `nanos-lite` and `navy-apps`, patches only temp trees, boots Nanos-lite, loads Navy `tests/hello`, exits into `/bin/dummy`, prints `Dummy from Navy-apps`, and good-traps |
 | Nanos-lite batch two programs | OS | pass | 2026-07-15 | Covered by `make pa-nanos-tests` for a minimal hello-to-dummy batch path; full Nanos process model and `execve` remain separate targets |
 | Navy libc/newlib hello | Navy | pass | 2026-07-15 | `make pa-nanos-libc-test`; official Navy `tests/hello` builds with downloaded compiler-rt/newlib sources, prints through libc `printf` and libos syscalls under Nanos-lite, then reaches the bounded instruction limit. The temp compatibility patch excludes riscv32-incompatible `getpass.c`, `stat64r.c`, and `wcwidth.c`. |
-| NDL draw app | Navy | not-started | - | A dedicated draw-app artifact is not wired yet; the NSlider run exercises the NDL framebuffer path |
-| NSlider | Navy/miniSDL | fail | 2026-07-15 | `make pa-navy-ndl-test`; official NSlider builds with real libc/libndl/libminiSDL/libbmp, renders a bounded first frame through `/dev/fb`, and reaches the instruction limit. The run uses placeholder copies of `projectn.bmp`; keyboard navigation and real slide assets are not verified |
-| Flappy Bird | Navy/miniSDL | not-started | - | Requires full Navy/NDL/miniSDL stack |
+| NDL draw app | Navy | pass | 2026-07-17 | `make pa-ndl-test`; standalone NDL test exercises NDL_Init, NDL_OpenCanvas, NDL_DrawRect, NDL_GetTicks, NDL_PollEvent, and NDL_Quit |
+| NSlider | Navy/miniSDL | pass | 2026-07-17 | `make pa-navy-ndl-test`; official NSlider builds with real libc/libndl/libminiSDL/libbmp, renders real generated slides (gen_slides.py), keyboard navigation via --key-events injection verifies slide transitions with different framebuffer checksums |
+| Flappy Bird | Navy/miniSDL | pass | 2026-07-17 | `make pa-bird-test`; bird builds with libminiSDL/libSDL_image/libfixedptc, loads PNG sprites via stb_image IMG_Load, renders title screen, runs 50M instructions without crashing |
+| Nanos-lite execve | OS | pass | 2026-07-17 | `make pa-execve-test`; SYS_execve handler loads new ELF and replaces current program; execve-test calls execve("/bin/hello") and hello runs successfully |
 | PAL / 仙剑 | Navy/miniSDL | not-started | - | Requires full Navy/NDL/miniSDL stack and game assets |
 | yield-os | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `am-kernels/kernels/yield-os` alternates A/B under CTE context switching |
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
