@@ -58,7 +58,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario memu-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test \
+  mario memu-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -95,6 +95,7 @@ help:
 	@printf '%s\n' '  make pa-nanos-tests  Build and run real Nanos-lite with Navy hello+dummy'
 	@printf '%s\n' '  make pa-nanos-libc-test Build and run real Navy libc printf through Nanos-lite'
 	@printf '%s\n' '  make pa-navy-ndl-test Build and run real Navy NSlider through NDL/miniSDL'
+	@printf '%s\n' '  make pa-ndl-test     Build and run standalone NDL draw/event/timer test'
 	@printf '%s\n' '  make runner-test     Run tools/run-tests.sh'
 	@printf '%s\n' '  make cmake-build     Configure and build with CMake'
 	@printf '%s\n' '  make cmake-test      Run CTest'
@@ -229,6 +230,11 @@ pa-nanos-libc-test: $(MEMU)
 pa-navy-ndl-test: $(MEMU)
 	PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
 	PA_NANOS_APP_NAME=nslider PA_NANOS_APP_DIR=apps/nslider PA_NANOS_APP_PATH=/bin/nslider \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-ndl-test: $(MEMU)
+	PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
+	PA_NANOS_APP_NAME=ndl-test PA_NANOS_APP_DIR=tests/ndl-test PA_NANOS_APP_PATH=/bin/ndl-test \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
 
 runner-test: $(MEMU) $(STAGE1_IMAGE) $(STAGE3_IMAGES) $(STAGE4_IMAGES) $(STAGE5_IMAGES) $(STAGE6_IMAGES) $(STAGE7_IMAGES) $(TOOLCHAIN_IMAGES)

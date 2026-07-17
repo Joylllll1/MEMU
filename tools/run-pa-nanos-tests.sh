@@ -77,6 +77,17 @@ if [ "${ndl}" = 1 ]; then
   python3 "${script_dir}/patch-pa-navy-ndl.py" "${navy_home}"
 fi
 
+if [ "${app_name}" = "ndl-test" ]; then
+  mkdir -p "${navy_home}/tests/ndl-test"
+  cp "${script_dir}/mkbin/ndl-test.c" "${navy_home}/tests/ndl-test/"
+  cat > "${navy_home}/tests/ndl-test/Makefile" << 'MAKEEOF'
+NAME = ndl-test
+SRCS = ndl-test.c
+LIBS += libndl
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
@@ -161,6 +172,9 @@ case "${app_name}" in
     ;;
   event-test)
     require_output "instruction limit reached"
+    ;;
+  ndl-test)
+    require_output "PASS: ndl-test"
     ;;
   *)
     echo "no output checks defined for Navy app: ${app_name}" >&2
