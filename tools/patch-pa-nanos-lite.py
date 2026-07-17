@@ -405,6 +405,13 @@ void naive_uload(PCB *pcb, const char *filename) {
   Log("Jump to entry = %p", entry);
   ((void(*)())entry) ();
 }
+
+void naive_execve(const char *filename) {
+  PCB pcb;
+  uintptr_t entry = loader(&pcb, filename);
+  Log("execve: %s -> entry = %p", filename, entry);
+  ((void(*)())entry) ();
+}
 ''',
         encoding="ascii",
     )
@@ -421,6 +428,7 @@ size_t fs_lseek(int fd, size_t offset, int whence);
 int fs_close(int fd);
 int mm_brk(uintptr_t brk);
 void naive_uload(PCB *pcb, const char *filename);
+void naive_execve(const char *filename);
 
 static PCB batch_pcb;
 static const char *batch_programs[] = {
@@ -482,6 +490,9 @@ void do_syscall(Context *c) {
       c->GPRx = 0;
       break;
     }
+    case SYS_execve:
+      naive_execve((const char *)a[1]);
+      break;
     default:
       panic("Unhandled syscall ID = %d", a[0]);
   }
@@ -703,7 +714,8 @@ int snprintf(char *out, size_t n, const char *fmt, ...) {
 
     syscall_suffix = r'''
 int _execve(const char *fname, char * const argv[], char *const envp[]) {
-  (void)fname; (void)argv; (void)envp;
+  (void)argv; (void)envp;
+  _syscall_(SYS_execve, (intptr_t)fname, 0, 0);
   return -1;
 }
 

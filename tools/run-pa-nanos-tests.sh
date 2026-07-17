@@ -88,6 +88,16 @@ include $(NAVY_HOME)/Makefile
 MAKEEOF
 fi
 
+if [ "${app_name}" = "execve-test" ]; then
+  mkdir -p "${navy_home}/tests/execve-test"
+  cp "${script_dir}/mkbin/execve-test.c" "${navy_home}/tests/execve-test/"
+  cat > "${navy_home}/tests/execve-test/Makefile" << 'MAKEEOF'
+NAME = execve-test
+SRCS = execve-test.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
@@ -102,6 +112,9 @@ case "${app_dir}" in
     ;;
   tests/*)
     ramdisk_tests="dummy ${app_dir#tests/}"
+    if [ "${app_name}" = "execve-test" ]; then
+      ramdisk_tests="dummy hello execve-test"
+    fi
     ;;
   *)
     echo "unsupported Navy app directory: ${app_dir}" >&2
@@ -185,6 +198,15 @@ case "${app_name}" in
     ;;
   ndl-test)
     require_output "PASS: ndl-test"
+    ;;
+  execve-test)
+    require_output "execve-test: before execve"
+    require_output "Hello World"
+    if grep -q "FAIL: execve returned" "${tmp_root}/run-nanos.log"; then
+      echo "FAIL execve-test: execve returned instead of replacing program"
+      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      exit 1
+    fi
     ;;
   bird)
     if grep -q "instruction limit reached" "${tmp_root}/run-nanos.log"; then
