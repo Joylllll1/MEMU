@@ -18,9 +18,9 @@ corresponding NEMU PA stage complete. Stage completion follows
 Current strict summary:
 
 ```text
-Local scaffold implemented through: Stage 7
-NEMU-aligned complete through: Stage 5 AM app smoke gate
-Active gate: PA2 FCEUX bounded execution passes with a public NES test ROM; PA3 real Navy libc hello, NSlider multi-slide navigation, Flappy Bird, and execve program replacement pass; PAL remains not-started.
+Local scaffold implemented through: Stage 8
+NEMU-aligned complete through: Stage 8 per docs/nemu-strict-alignment.md stage rules (PA4 yield/context/vmem/timer pass and PA3 apps still work)
+Active gate: PAL remains not-started as the outstanding optional PA3 app; everything else in the strict order has recorded results.
 ```
 
 | Program | Layer | Status | Last Run | Notes |
@@ -65,7 +65,8 @@ Active gate: PA2 FCEUX bounded execution passes with a public NES test ROM; PA3 
 | PAL / 仙剑 | Navy/miniSDL | not-started | - | Requires full Navy/NDL/miniSDL stack and game assets |
 | yield-os | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `am-kernels/kernels/yield-os` alternates A/B under CTE context switching |
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
-| virtual memory smoke | PA4 | not-started | - | Stage 8 target |
+| virtual memory smoke | PA4 | pass | 2026-07-17 | `make stage8-test` runs mp-os: two processes share user VA 0x40000000 mapped to different physical pages under real Sv32, timer preemption yields 16 alternating A/B timeslices, and vm-fault verifies the page-fault diagnostic |
+| Navy hello under Sv32 VME | PA4 | pass | 2026-07-17 | `make pa-vme-test`; Nanos-lite enables HAS_VME, vme_init turns on satp, loader map()s the ELF and an 8-page user stack into USER_SPACE at 0x40000000, and full-libc hello prints through printf under paging |
 
 ## Run Notes
 

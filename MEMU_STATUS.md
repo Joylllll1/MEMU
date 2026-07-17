@@ -1,6 +1,6 @@
 # MEMU Project Handoff Status
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 This file is the cross-device handoff for MEMU. Read it before changing code.
 The authoritative checkout is:
@@ -13,12 +13,13 @@ Do not use `/Users/wjl/Documents/MEMU`; that is an older copy.
 
 ## One-line Status
 
-The local teaching emulator scaffold is implemented through Stage 7. Real NEMU
-PA compatibility has passed the CPU, AM/IOE, AM app, LiteNES/Mario bounded, and
-CTE smoke gates. PA3/Navy work is active: real Nanos-lite direct-syscall batch,
-full Navy libc/newlib hello, and a bounded NSlider first-frame render pass;
-full NDL interaction, real slide assets, Flappy Bird, PAL, execve-style program
-replacement, and Stage 8 virtual memory remain incomplete.
+The local teaching emulator scaffold is implemented through Stage 8, and the
+strict NEMU alignment gates are complete through Stage 8: real CPU, AM/IOE,
+AM app, LiteNES/Mario and FCEUX bounded, CTE yield-os/thread-os, Nanos-lite
+batch, full Navy libc hello, NSlider multi-slide navigation, standalone NDL,
+Flappy Bird, execve program replacement, and Sv32 virtual memory (local mp-os
+plus Navy hello under Nanos-lite HAS_VME paging) all pass. PAL/仙剑 remains
+the outstanding optional PA3 app.
 
 ## Stage Status
 
@@ -29,10 +30,10 @@ replacement, and Stage 8 virtual memory remain incomplete.
 | Stage 2 | complete | monitor, commands, expression evaluator, watchpoints |
 | Stage 3 | complete | RV32I execution plus local RV32M/CSR extensions used by later guests |
 | Stage 4 | complete | runtime loop, raw/ELF loader, instruction limit, trap/error reporting |
-| Stage 5 | complete locally | serial, timer, keyboard, framebuffer, audio, SDL/Mario support |
-| Stage 6 | complete locally | ecall/syscalls, brk, batch-list, program handoff |
-| Stage 7 | complete locally | ramdisk, SFS/fixed file table, fd operations, user fs loader |
-| Stage 8 | not started | multiprogramming, virtual memory, interrupts as a full stage |
+| Stage 5 | complete | serial, timer, keyboard, framebuffer, audio, SDL/Mario support; real AM IOE tests and AM apps pass |
+| Stage 6 | complete | ecall/syscalls, brk, batch-list, program handoff; real Nanos-lite batch users pass |
+| Stage 7 | complete | ramdisk, SFS/fixed file table, fd operations, user fs loader; real Navy apps and NSlider pass |
+| Stage 8 | complete | Sv32 virtual memory, mp-os multiprogramming scaffold, timer preemption; strict PA4 gate passes via `make pa-vme-test` |
 
 Important: “complete locally” means the MEMU scaffold and focused tests pass. It
 does not automatically mean the corresponding NEMU PA stage is complete.
@@ -57,22 +58,22 @@ Passed real artifact gates:
 - Real Navy libc/newlib/compiler-rt `tests/hello` passes through
   `make pa-nanos-libc-test`.
 - Official Navy `apps/nslider` builds with real libc, libbmp, libminiSDL, and
-  libndl, renders a bounded first frame through `/dev/fb`, and reaches the
-  instruction limit through `make pa-navy-ndl-test`.
+  libndl, renders real generated slides, and verifies keyboard navigation via
+  `--key-events` injection through `make pa-navy-ndl-test`.
+- Standalone NDL draw/event/timer test passes through `make pa-ndl-test`.
+- Flappy Bird builds with libminiSDL/libSDL_image/libfixedptc, loads PNG
+  sprites through stb_image, and runs bounded through `make pa-bird-test`.
+- execve program replacement passes through `make pa-execve-test`.
+- Sv32 virtual memory: the local mp-os two-process scaffold passes through
+  `make stage8-test`, and official Navy hello runs under Nanos-lite HAS_VME
+  paging in USER_SPACE 0x40000000 through `make pa-vme-test`.
 
 Not complete under strict acceptance:
 
-- NSlider keyboard navigation and real slide assets. The current smoke copies
-  `projectn.bmp` into placeholder slide files because the PA checkout has no
-  generated NSlider slide assets.
-- A standalone NDL draw app.
-- Full interactive miniSDL behavior, Flappy Bird, and PAL/仙剑.
-- Full Nanos-lite process model and execve-style program replacement.
-- Stage 8 virtual memory and full PA4 integration.
+- PAL/仙剑, which needs the full miniSDL stack plus game assets.
 
-The current strict summary is intentionally conservative: NSlider is recorded
-as `fail` in `docs/compat-status.md` because it renders only a bounded first
-frame and has not yet demonstrated interaction.
+The compatibility tables in `docs/compat-status.md` record per-program status
+and commands; `docs/nemu-strict-alignment.md` remains the completion rule.
 
 ## Most Useful Commands
 
@@ -110,6 +111,10 @@ make pa-cte-os-tests PA_HOME=/path/to/ICS-PA
 make pa-nanos-tests PA_HOME=/path/to/ICS-PA
 make pa-nanos-libc-test PA_HOME=/path/to/ICS-PA
 make pa-navy-ndl-test PA_HOME=/path/to/ICS-PA
+make pa-ndl-test PA_HOME=/path/to/ICS-PA
+make pa-bird-test PA_HOME=/path/to/ICS-PA
+make pa-execve-test PA_HOME=/path/to/ICS-PA
+make pa-vme-test PA_HOME=/path/to/ICS-PA
 ```
 
 Use a separate build directory for repeatable verification:
@@ -172,21 +177,17 @@ stage, compatibility status, commands, or blockers change.
 
 ## Next Recommended Work
 
-Continue compatibility work before starting Stage 8:
+Stage 8 is complete under the strict rules. Remaining and optional work:
 
-1. Replace placeholder NSlider slide assets with real generated assets, or add a
-   documented artifact import step for them.
-2. Add an automated input injection path and verify NSlider keyboard navigation
-   through multiple slides.
-3. Run a small standalone NDL draw app and an event/timer app.
-4. Bring up Flappy Bird or another miniSDL application with real assets.
-5. Implement full Nanos-lite program replacement/execve behavior.
-6. Only then begin Stage 8 by reading
-   `docs/textbook/chapter-09-multiprogramming-vmem-interrupts.md` and
-   `docs/stages/stage-08-multiprogramming-vmem.md` completely.
+1. PAL/仙剑 bring-up on the Navy/miniSDL stack, including game assets.
+2. Optional performance work: a small software TLB in `src/memory/mmu.c` if
+   long VME-enabled runs become slow (translation currently walks the page
+   tables on every access).
+3. Optional PA4 depth: run more programs under `MEMU_NANOS_VME=1` (file-test,
+   NSlider) and a scheduler with multiple resident user processes.
 
-Do not claim Stage 7 NEMU-aligned completion merely because local Stage 7 tests
-pass. Do not claim PA3/C4 completion until a graphical Navy app is interactive.
+Do not regress the non-VME test paths: `MEMU_NANOS_VME` defaults to unset and
+all pre-Stage-8 targets must keep passing unchanged.
 
 ## Git Handoff
 

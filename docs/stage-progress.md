@@ -14,11 +14,11 @@ changes.
 
 ## Current Status
 
-- Local scaffold implemented through: Stage 7, ramdisk, simple file system, and
-  fs loader.
-- NEMU-aligned complete through: Stage 5 AM app smoke gate, including CTE
-  yield, audio, devscan, and bounded runs of slider, typing-game, demo, snake,
-  bad-apple, and LiteNES/Mario.
+- Local scaffold implemented through: Stage 8, Sv32 virtual memory and the
+  mp-os two-process preemption scaffold.
+- NEMU-aligned complete through: Stage 8 per the
+  `docs/nemu-strict-alignment.md` stage completion rules; real PA4
+  yield/context/vmem/timer tests pass while the PA3 apps still work.
 - Additional CTE/PA4 prework: real `yield-os` and `thread-os` pass with
   `make pa-cte-os-tests`; MEMU now has minimal machine timer interrupt
   injection for `mstatus.MIE` + `mtvec`.
@@ -46,6 +46,11 @@ changes.
 - The full libc smoke uses downloaded compiler-rt/newlib sources and excludes
   three riscv32-incompatible newlib sources in the temporary tree:
   `getpass.c`, `stat64r.c`, and `wcwidth.c`.
+- Stage 8 virtual memory is complete: MEMU implements real Sv32 translation
+  (satp CSR, two-level walk, page-fault diagnostics), the local mp-os
+  scaffold demonstrates same-VA isolation with timer preemption, and the
+  real PA4 path runs official Navy hello under Nanos-lite HAS_VME paging
+  through `make pa-vme-test`.
 
 ## Strict NEMU Alignment Rule
 
@@ -84,6 +89,7 @@ FCEUX status: pass for bounded execution of public `nestest.nes`; the official
 PA Box URL currently returns a login page rather than the historical archive
 yield-os/thread-os status: pass for real am-kernels CTE/context-switch smoke
 Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL remains not-started
+PA4 virtual memory status: pass; MEMU Sv32 translation drives the local mp-os two-process scaffold (`make stage8-test`) and official Navy hello under Nanos-lite HAS_VME paging (`make pa-vme-test`)
 ```
 
 ## Stage 0 Verification
@@ -507,6 +513,95 @@ tests/fsimg/bin/fs-missing.bin
 tests/fsimg/share/message.txt
 ```
 
+## Stage 8 Sv32 Virtual Memory
+
+MEMU implements real RISC-V Sv32 address translation instead of the simplified
+linear lookup that `docs/textbook/chapter-09` suggested for the teaching
+scaffold. This is a deliberate deviation: strict NEMU alignment requires real
+`satp`-based two-level page tables because the real AM `vme.c` programs `satp`
+directly, and maintaining a second translation mechanism only for the scaffold
+would double the emulator surface. The scaffold and the real PA4 stack share
+one MMU.
+
+Emulator changes:
+
+- `satp` CSR (0x180) and `sfence.vma` (a no-op; there is no TLB, tables are
+  walked on every access) in `src/isa/rv32i.c`.
+- `src/memory/mmu.c` implements the Sv32 walk: two levels, 4 KiB pages, PTE
+  format `ppn << 10 | X/W/R/V`. Page-table entries are read through a physical
+  reader that bypasses translation. Invalid or permission-violating accesses
+  panic with vaddr, pc, access type, level, and PTE value.
+- `mem_read`/`mem_write` translate when `satp.MODE = 1` and split unaligned
+  accesses that cross a page boundary; `inst_fetch` translates the PC.
+
+Local scaffold verification:
+
+```sh
+make stage8-test
+```
+
+- `tests/guest/vm/mp_os.c` builds two address spaces that map the same user VA
+  (0x40000000 code, 0x40001000 data) to different physical pages, copies the
+  same position-independent user loop into both code pages, and alternates the
+  two processes on MEMU machine timer interrupts. Each process prints the
+  letter it reads from the shared VA, so the alternating output proves same-VA
+  isolation plus preemption without any yield or syscall in the user loop.
+- `tests/guest/vm/vm_fault.c` enables satp and touches an unmapped VA; the
+  test requires the page-fault diagnostic including the vaddr.
+- Verified output: 16 alternating timeslices `ABABABABABABABAB`, then
+  `PASS: mp-os` and a good trap.
+
+Strict PA4 path:
+
+```sh
+make pa-vme-test
+```
+
+- `tools/patch-pa-nemu-ioe.py` implements AM `vme.c` `map()` (real Sv32 PTE
+  writes with on-demand second-level tables) and `ucontext()`, calls
+  `__am_get_cur_as`/`__am_switch` around `user_handler` in `__am_irq_handle`,
+  and grows the trap frame `CONTEXT_SIZE` to `(NR_REGS + 4) * XLEN` so the
+  Context `pdir` slot lives inside the frame instead of clobbering the
+  interrupted stack.
+- `tools/patch-pa-nanos-lite.py` gains a VME mode (`MEMU_NANOS_VME=1`):
+  `HAS_VME` is enabled, `mm_brk` maps heap pages on demand, and the loader
+  `protect()`s a user address space, loads ELF segments into physical pages
+  via `map()`, maps an 8-page user stack below 0x80000000, and enters the
+  user program with a satp switch.
+- Navy user programs link at 0x40000000 through the stock
+  `LNK_ADDR = $(if $(VME), 0x40000000, 0x83000000)` logic in
+  `navy-apps/scripts/riscv/common.mk`; the runner passes `VME=1` when
+  `PA_NANOS_VME=1`, and libos `_sbrk` starts the heap at the linker-provided
+  `end` symbol instead of a fixed physical address.
+- Verified: official Navy `tests/hello` with full newlib libc prints through
+  `printf` while running under Sv32 paging and reaches the bounded
+  instruction limit.
+
+## Stage 8 Required Questions
+
+1. A context switch must save at minimum the program counter (mepc), the 31
+   general-purpose registers, and the identity of the address space (the satp
+   or page-directory pointer). mp-os saves x1-x31 plus mepc per process; the
+   AM Context adds `pdir` for the address space.
+2. Each process needs an independent stack because the stack holds live call
+   frames; if two processes shared one stack, the resumed process would find
+   its frames overwritten by the other's pushes and pops.
+3. Without virtual memory every program must be linked at (or relocated to) a
+   distinct physical range, and loading two builds of the same program at the
+   same address is impossible. With paging every process can believe it runs
+   at 0x40000000 while the kernel places it in any free physical pages.
+4. A virtual address is what guest code issues before translation; a physical
+   address is the guest address after the Sv32 walk; a host pointer is a C
+   pointer into MEMU's `pmem` array. They convert only through explicit steps:
+   `mmu_translate()` for VA to PA and `guest_to_host()` for PA to host.
+5. Cooperative yield depends on the process voluntarily trapping into the
+   kernel; timer preemption is driven by an external interrupt, so the kernel
+   regains control even when a process never yields. The mp-os user loop
+   contains no ecall at all and still gets switched.
+6. The timer cannot rely on syscalls because a buggy, malicious, or simply
+   compute-bound program may never issue one; only a hardware interrupt
+   guarantees the kernel periodically regains the CPU.
+
 ## Stage 7 Required Questions
 
 1. The ramdisk is the byte array loaded from a host image; the file system is
@@ -667,8 +762,9 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 
 ## Notes For Next Session
 
-- Stage 7 local scaffold is complete at the MEMU SFS smoke-test level, but
-  Stage 7 is not NEMU-aligned complete.
+- Stage 8 is complete both as a local scaffold (`make stage8-test`) and under
+  the strict NEMU alignment rules (`make pa-vme-test` plus the full pa-*
+  regression). PAL/仙剑 is the remaining optional PA3 app target.
 - Stage 1 uses `a0 == 0` as good trap and keeps `a1 = 42` as the visible
   computation result.
 - `ebreak` records `pc` as the trap instruction address, not the following PC.
