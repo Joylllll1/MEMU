@@ -230,6 +230,116 @@ VIDEO_REPLACEMENTS = {
 }
 
 
+FILE_SOURCE = r'''#include <sdl-file.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static int64_t rw_size(SDL_RWops *f) {
+  long cur = ftell(f->fp);
+  fseek(f->fp, 0, SEEK_END);
+  long sz = ftell(f->fp);
+  fseek(f->fp, cur, SEEK_SET);
+  return sz;
+}
+
+static int64_t rw_seek(SDL_RWops *f, int64_t offset, int whence) {
+  return fseek(f->fp, (long)offset, whence);
+}
+
+static size_t rw_read(SDL_RWops *f, void *buf, size_t size, size_t nmemb) {
+  return fread(buf, size, nmemb, f->fp);
+}
+
+static size_t rw_write(SDL_RWops *f, const void *buf, size_t size, size_t nmemb) {
+  return fwrite(buf, size, nmemb, f->fp);
+}
+
+static int rw_close(SDL_RWops *f) {
+  int ret = 0;
+  if (f->fp != NULL) { ret = fclose(f->fp); f->fp = NULL; }
+  free(f);
+  return ret;
+}
+
+SDL_RWops* SDL_RWFromFile(const char *filename, const char *mode) {
+  FILE *fp = fopen(filename, mode);
+  if (fp == NULL) return NULL;
+  SDL_RWops *rw = calloc(1, sizeof(SDL_RWops));
+  if (rw == NULL) { fclose(fp); return NULL; }
+  rw->type = RW_TYPE_FILE;
+  rw->fp = fp;
+  rw->size = rw_size;
+  rw->seek = rw_seek;
+  rw->read = rw_read;
+  rw->write = rw_write;
+  rw->close = rw_close;
+  return rw;
+}
+
+SDL_RWops* SDL_RWFromMem(void *mem, int size) {
+  if (mem == NULL || size <= 0) return NULL;
+  SDL_RWops *rw = calloc(1, sizeof(SDL_RWops));
+  if (rw == NULL) return NULL;
+  rw->type = RW_TYPE_MEM;
+  rw->mem.base = mem;
+  rw->mem.size = size;
+  return rw;
+}
+'''
+
+
+IMAGE_SOURCE = r'''#include <SDL.h>
+#include <SDL_image.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define STBI_NO_STDIO
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+SDL_Surface* IMG_Load(const char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (fp == NULL) return NULL;
+  fseek(fp, 0, SEEK_END);
+  long sz = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  unsigned char *buf = malloc(sz);
+  if (buf == NULL) { fclose(fp); return NULL; }
+  if (fread(buf, 1, sz, fp) != (size_t)sz) { free(buf); fclose(fp); return NULL; }
+  fclose(fp);
+
+  int w, h, comp;
+  unsigned char *data = stbi_load_from_memory(buf, (int)sz, &w, &h, &comp, 4);
+  free(buf);
+  if (data == NULL) return NULL;
+
+  SDL_Surface *s = SDL_CreateRGBSurfaceFrom(data, w, h, 32, w * 4,
+      0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+  if (s == NULL) { free(data); return NULL; }
+  s->flags &= ~SDL_PREALLOC;
+  return s;
+}
+
+SDL_Surface* IMG_Load_RW(SDL_RWops *src, int freesrc) {
+  (void)src; (void)freesrc;
+  return NULL;
+}
+
+int IMG_isPNG(SDL_RWops *src) {
+  (void)src;
+  return 0;
+}
+
+SDL_Surface* IMG_LoadJPG_RW(SDL_RWops *src) {
+  return IMG_Load_RW(src, 0);
+}
+
+char *IMG_GetError() {
+  return "Navy IMG_GetError";
+}
+'''
+
+
 def patch_tree(navy: Path) -> None:
     (navy / "libs/libndl/NDL.c").write_text(NDL_SOURCE, encoding="ascii")
     (navy / "libs/libminiSDL/src/event.c").write_text(EVENT_SOURCE, encoding="ascii")
@@ -242,6 +352,9 @@ def patch_tree(navy: Path) -> None:
             raise SystemExit(f"missing miniSDL video stub: {old.splitlines()[0]}")
         video = video.replace(old, new)
     video_path.write_text(video, encoding="ascii")
+
+    (navy / "libs/libminiSDL/src/file.c").write_text(FILE_SOURCE, encoding="ascii")
+    (navy / "libs/libSDL_image/src/image.c").write_text(IMAGE_SOURCE, encoding="ascii")
 
 
 def main() -> int:

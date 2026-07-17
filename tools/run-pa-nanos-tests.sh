@@ -96,6 +96,9 @@ case "${app_dir}" in
     ramdisk_apps="${app_dir#apps/}"
     mkdir -p "${navy_home}/fsimg/share/slides"
     python3 "${script_dir}/mkbin/gen_slides.py" "${navy_home}/fsimg/share/slides" 10
+    if [ "${app_name}" = "bird" ]; then
+      awk '/^include.*NAVY_HOME/{print "CFLAGS += -D_GNU_SOURCE"}1' "${navy_home}/apps/bird/Makefile" > "${navy_home}/apps/bird/Makefile.tmp" && mv "${navy_home}/apps/bird/Makefile.tmp" "${navy_home}/apps/bird/Makefile"
+    fi
     ;;
   tests/*)
     ramdisk_tests="dummy ${app_dir#tests/}"
@@ -106,7 +109,14 @@ case "${app_dir}" in
     ;;
 esac
 
-PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" install
+if [ "${app_name}" = "bird" ]; then
+  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" app
+  mkdir -p "${navy_home}/fsimg/bin" "${navy_home}/fsimg/share/games/bird"
+  cp "${navy_home}/apps/bird/build/bird-riscv32" "${navy_home}/fsimg/bin/bird"
+  cp -r "${navy_home}/apps/bird/repo/res/"* "${navy_home}/fsimg/share/games/bird/"
+else
+  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" install
+fi
 PATH="${shim_dir}:$PATH" make -s -C "${navy_home}" ISA=riscv32 NAVY_HOME="${navy_home}" \
   APPS="${ramdisk_apps}" TESTS="${ramdisk_tests}" ramdisk
 PATH="${shim_dir}:$PATH" make -s -C "${nanos_home}" update \
@@ -175,6 +185,15 @@ case "${app_name}" in
     ;;
   ndl-test)
     require_output "PASS: ndl-test"
+    ;;
+  bird)
+    if grep -q "instruction limit reached" "${tmp_root}/run-nanos.log"; then
+      echo "Bird ran without crashing (instruction limit reached)"
+    else
+      echo "FAIL bird: did not reach instruction limit (likely crashed)"
+      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      exit 1
+    fi
     ;;
   *)
     echo "no output checks defined for Navy app: ${app_name}" >&2
