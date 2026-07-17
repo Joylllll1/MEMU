@@ -9,6 +9,7 @@ app_name="${PA_NANOS_APP_NAME:-hello}"
 app_dir="${PA_NANOS_APP_DIR:-tests/hello}"
 app_path="${PA_NANOS_APP_PATH:-/bin/hello}"
 ndl="${PA_NANOS_NDL:-0}"
+vme="${PA_NANOS_VME:-0}"
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 if [ -z "${pa_home}" ]; then
@@ -69,9 +70,9 @@ fi
 
 python3 "${script_dir}/patch-pa-nemu-ioe.py" "${am_home}"
 if [ "${full_libc}" = 1 ]; then
-  MEMU_NANOS_APP="${app_path}" python3 "${script_dir}/patch-pa-nanos-lite.py" "${nanos_home}" "${navy_home}" full-libc
+  MEMU_NANOS_APP="${app_path}" MEMU_NANOS_VME="${vme}" python3 "${script_dir}/patch-pa-nanos-lite.py" "${nanos_home}" "${navy_home}" full-libc
 else
-  MEMU_NANOS_APP="${app_path}" python3 "${script_dir}/patch-pa-nanos-lite.py" "${nanos_home}" "${navy_home}"
+  MEMU_NANOS_APP="${app_path}" MEMU_NANOS_VME="${vme}" python3 "${script_dir}/patch-pa-nanos-lite.py" "${nanos_home}" "${navy_home}"
 fi
 if [ "${ndl}" = 1 ]; then
   python3 "${script_dir}/patch-pa-navy-ndl.py" "${navy_home}"
@@ -122,15 +123,20 @@ case "${app_dir}" in
     ;;
 esac
 
+navy_vme_arg=""
+if [ "${vme}" = 1 ]; then
+  navy_vme_arg="VME=1"
+fi
+
 if [ "${app_name}" = "bird" ]; then
-  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" app
+  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} app
   mkdir -p "${navy_home}/fsimg/bin" "${navy_home}/fsimg/share/games/bird"
   cp "${navy_home}/apps/bird/build/bird-riscv32" "${navy_home}/fsimg/bin/bird"
   cp -r "${navy_home}/apps/bird/repo/res/"* "${navy_home}/fsimg/share/games/bird/"
 else
-  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" install
+  PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
 fi
-PATH="${shim_dir}:$PATH" make -s -C "${navy_home}" ISA=riscv32 NAVY_HOME="${navy_home}" \
+PATH="${shim_dir}:$PATH" make -s -C "${navy_home}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} \
   APPS="${ramdisk_apps}" TESTS="${ramdisk_tests}" ramdisk
 PATH="${shim_dir}:$PATH" make -s -C "${nanos_home}" update \
   ARCH=riscv32-nemu CROSS_COMPILE=riscv64-unknown-elf- \
@@ -223,7 +229,9 @@ case "${app_name}" in
     ;;
 esac
 
-if [ "${full_libc}" = 1 ] && [ "${app_name}" = hello ]; then
+if [ "${vme}" = 1 ] && [ "${app_name}" = hello ]; then
+  echo "PASS nanos-lite-vme-hello"
+elif [ "${full_libc}" = 1 ] && [ "${app_name}" = hello ]; then
   echo "PASS nanos-lite-libc-hello"
 elif [ "${app_name}" = hello ]; then
   echo "PASS nanos-lite-hello-batch"

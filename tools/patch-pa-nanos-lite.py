@@ -4,15 +4,17 @@ import sys
 from pathlib import Path
 
 
-def patch_common(nanos: Path) -> None:
+def patch_common(nanos: Path, vme: bool = False) -> None:
     common = nanos / "include/common.h"
     text = common.read_text(encoding="ascii")
     text = text.replace("//#define HAS_CTE", "#define HAS_CTE")
+    if vme:
+        text = text.replace("//#define HAS_VME", "#define HAS_VME")
     common.write_text(text, encoding="ascii")
 
 
-def patch_nanos(nanos: Path, app_path: str = "/bin/hello") -> None:
-    patch_common(nanos)
+def patch_nanos(nanos: Path, app_path: str = "/bin/hello", vme: bool = False) -> None:
+    patch_common(nanos, vme=vme)
 
     (nanos / "src/main.c").write_text(
         r'''#include <common.h>
@@ -99,18 +101,20 @@ void init_irq(void) {
 
     (nanos / "src/mm.c").write_text(
         r'''#include <memory.h>
+#include <proc.h>
 
 static void *pf = NULL;
 
 void* new_page(size_t nr_page) {
   void *p = pf;
   pf += nr_page * PGSIZE;
+  memset(p, 0, nr_page * PGSIZE);
   return p;
 }
 
 #ifdef HAS_VME
 static void* pg_alloc(int n) {
-  return new_page(n);
+  return new_page(((size_t)n + PGSIZE - 1) / PGSIZE);
 }
 #endif
 
@@ -119,7 +123,18 @@ void free_page(void *p) {
 }
 
 int mm_brk(uintptr_t brk) {
+#ifdef HAS_VME
+  if (current->max_brk == 0) {
+    return 0;
+  }
+  while (current->max_brk < brk) {
+    void *pa = new_page(1);
+    map(&current->as, (void *)current->max_brk, pa, MMAP_READ | MMAP_WRITE);
+    current->max_brk += PGSIZE;
+  }
+#else
   (void)brk;
+#endif
   return 0;
 }
 
@@ -358,8 +373,110 @@ int fs_close(int fd) {
         encoding="ascii",
     )
 
-    (nanos / "src/loader.c").write_text(
-        r'''#include <proc.h>
+    if vme:
+        (nanos / "src/loader.c").write_text(
+            r'''#include <proc.h>
+#include <memory.h>
+#include <elf.h>
+#include <fs.h>
+
+#ifdef __LP64__
+# define Elf_Ehdr Elf64_Ehdr
+# define Elf_Phdr Elf64_Phdr
+#else
+# define Elf_Ehdr Elf32_Ehdr
+# define Elf_Phdr Elf32_Phdr
+#endif
+
+int fs_open(const char *pathname, int flags, int mode);
+size_t fs_read(int fd, void *buf, size_t len);
+size_t fs_lseek(int fd, size_t offset, int whence);
+int fs_close(int fd);
+
+#define USTACK_PAGES 8
+#define USER_STACK_TOP 0x80000000u
+
+static uintptr_t loader(PCB *pcb, const char *filename) {
+  int fd = fs_open(filename, 0, 0);
+  assert(fd >= 0);
+
+  Elf_Ehdr eh;
+  assert(fs_read(fd, &eh, sizeof(eh)) == sizeof(eh));
+  assert(*(uint32_t *)eh.e_ident == 0x464c457f);
+
+  uintptr_t min_va = (uintptr_t)-1;
+  uintptr_t max_va = 0;
+  for (int i = 0; i < eh.e_phnum; i++) {
+    Elf_Phdr ph;
+    fs_lseek(fd, eh.e_phoff + i * sizeof(ph), SEEK_SET);
+    assert(fs_read(fd, &ph, sizeof(ph)) == sizeof(ph));
+    if (ph.p_type != PT_LOAD) {
+      continue;
+    }
+    uintptr_t start = ROUNDDOWN(ph.p_vaddr, PGSIZE);
+    uintptr_t end = ph.p_vaddr + ph.p_memsz;
+    if (start < min_va) min_va = start;
+    if (end > max_va) max_va = end;
+  }
+  assert(min_va < max_va);
+
+  size_t nr_pages = (ROUNDUP(max_va, PGSIZE) - min_va) / PGSIZE;
+  uint8_t *pa_base = new_page(nr_pages);
+  for (size_t i = 0; i < nr_pages; i++) {
+    map(&pcb->as, (void *)(min_va + i * PGSIZE), pa_base + i * PGSIZE,
+        MMAP_READ | MMAP_WRITE);
+  }
+
+  for (int i = 0; i < eh.e_phnum; i++) {
+    Elf_Phdr ph;
+    fs_lseek(fd, eh.e_phoff + i * sizeof(ph), SEEK_SET);
+    assert(fs_read(fd, &ph, sizeof(ph)) == sizeof(ph));
+    if (ph.p_type != PT_LOAD) {
+      continue;
+    }
+    fs_lseek(fd, ph.p_offset, SEEK_SET);
+    assert(fs_read(fd, pa_base + (ph.p_vaddr - min_va), ph.p_filesz) == ph.p_filesz);
+  }
+  fs_close(fd);
+
+  uint8_t *stack_pa = new_page(USTACK_PAGES);
+  for (int i = 0; i < USTACK_PAGES; i++) {
+    map(&pcb->as,
+        (void *)(USER_STACK_TOP - (uintptr_t)(USTACK_PAGES - i) * PGSIZE),
+        stack_pa + (uintptr_t)i * PGSIZE, MMAP_READ | MMAP_WRITE);
+  }
+
+  pcb->max_brk = ROUNDUP(max_va, PGSIZE);
+  return eh.e_entry;
+}
+
+void naive_uload(PCB *pcb, const char *filename) {
+  protect(&pcb->as);
+  uintptr_t entry = loader(pcb, filename);
+  current = pcb;
+  Log("Jump to entry = %p", entry);
+  uintptr_t satp_value = (uintptr_t)1u << 31 | ((uintptr_t)pcb->as.ptr >> 12);
+  asm volatile(
+      "csrw satp, %0\n\t"
+      "sfence.vma\n\t"
+      "mv sp, %1\n\t"
+      "jr %2"
+      : : "r"(satp_value), "r"(USER_STACK_TOP - 16), "r"(entry));
+  while (1);
+}
+
+void naive_execve(const char *filename) {
+  static PCB execve_pcb;
+  memset(&execve_pcb, 0, sizeof(execve_pcb));
+  Log("execve: %s", filename);
+  naive_uload(&execve_pcb, filename);
+}
+''',
+            encoding="ascii",
+        )
+    else:
+        (nanos / "src/loader.c").write_text(
+            r'''#include <proc.h>
 #include <elf.h>
 #include <fs.h>
 
@@ -502,7 +619,7 @@ void do_syscall(Context *c) {
     )
 
 
-def patch_libos(navy: Path, with_libc: bool = False) -> None:
+def patch_libos(navy: Path, with_libc: bool = False, vme: bool = False) -> None:
     makefile = navy / "Makefile"
     text = makefile.read_text(encoding="ascii")
     if not with_libc:
@@ -791,6 +908,13 @@ unsigned int sleep(unsigned int seconds) {
 '''
 
     syscall_text = syscall_common
+    if vme:
+        # under VME the user image links at 0x40000000; start the heap at the
+        # linker-provided end symbol instead of a fixed physical address
+        syscall_text = syscall_text.replace(
+            "    program_break = 0x84000000;",
+            "    extern char end;\n    program_break = (uintptr_t)&end;",
+        )
     if with_libc:
         syscall_text += snprintf_stub
     syscall_text += syscall_suffix
@@ -833,8 +957,9 @@ def main() -> int:
     if with_libc and sys.argv[3] != "full-libc":
         print("third argument must be full-libc", file=sys.stderr)
         return 2
-    patch_nanos(Path(sys.argv[1]), os.environ.get("MEMU_NANOS_APP", "/bin/hello"))
-    patch_libos(Path(sys.argv[2]), with_libc=with_libc)
+    vme = os.environ.get("MEMU_NANOS_VME", "0") == "1"
+    patch_nanos(Path(sys.argv[1]), os.environ.get("MEMU_NANOS_APP", "/bin/hello"), vme=vme)
+    patch_libos(Path(sys.argv[2]), with_libc=with_libc, vme=vme)
     if with_libc:
         patch_libc(Path(sys.argv[2]))
     return 0
