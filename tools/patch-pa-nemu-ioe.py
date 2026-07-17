@@ -176,7 +176,12 @@ struct Context {
 
 static Context* (*user_handler)(Event, Context*) = NULL;
 
+void __am_get_cur_as(Context *c);
+void __am_switch(Context *c);
+
 Context* __am_irq_handle(Context *c) {
+  __am_get_cur_as(c);
+
   if (user_handler) {
     Event ev = {0};
     switch (c->mcause) {
@@ -195,6 +200,8 @@ Context* __am_irq_handle(Context *c) {
     c = user_handler(ev, c);
     assert(c != NULL);
   }
+
+  __am_switch(c);
 
   return c;
 }
@@ -244,10 +251,15 @@ void iset(bool enable) {
     )
 
     text = trap.read_text(encoding="ascii")
+    # Context ends with `void *pdir`; reserve its slot inside the trap frame so
+    # __am_get_cur_as does not overwrite the interrupted stack top.
+    if "#define CONTEXT_SIZE  ((NR_REGS + 3) * XLEN)" in text:
+        text = text.replace("#define CONTEXT_SIZE  ((NR_REGS + 3) * XLEN)",
+                            "#define CONTEXT_SIZE  ((NR_REGS + 4) * XLEN)")
     if "call __am_irq_handle\n\n  LOAD" in text:
         text = text.replace("call __am_irq_handle\n\n  LOAD",
                             "call __am_irq_handle\n\n  mv sp, a0\n\n  LOAD")
-        trap.write_text(text, encoding="ascii")
+    trap.write_text(text, encoding="ascii")
 
     mpe.write_text(
         r'''#include <am.h>
@@ -392,6 +404,118 @@ int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
     stdio.write_text(text, encoding="ascii")
 
 
+def patch_vme(am_home: Path) -> None:
+    vme = am_home / "am/src/riscv/nemu/vme.c"
+    vme.write_text(
+        r'''#include <am.h>
+#include <nemu.h>
+#include <klib.h>
+
+static AddrSpace kas = {};
+static void* (*pgalloc_usr)(int) = NULL;
+static void (*pgfree_usr)(void*) = NULL;
+static int vme_enable = 0;
+
+static Area segments[] = {      // Kernel memory mappings
+  NEMU_PADDR_SPACE
+};
+
+#define USER_SPACE RANGE(0x40000000, 0x80000000)
+
+#define PTE_V 0x01
+#define PTE_R 0x02
+#define PTE_W 0x04
+#define PTE_X 0x08
+
+static inline void set_satp(void *pdir) {
+  uintptr_t mode = 1ul << (__riscv_xlen - 1);
+  asm volatile("csrw satp, %0" : : "r"(mode | ((uintptr_t)pdir >> 12)));
+}
+
+static inline uintptr_t get_satp() {
+  uintptr_t satp;
+  asm volatile("csrr %0, satp" : "=r"(satp));
+  return satp << 12;
+}
+
+bool vme_init(void* (*pgalloc_f)(int), void (*pgfree_f)(void*)) {
+  pgalloc_usr = pgalloc_f;
+  pgfree_usr = pgfree_f;
+
+  kas.ptr = pgalloc_f(PGSIZE);
+
+  int i;
+  for (i = 0; i < LENGTH(segments); i ++) {
+    void *va = segments[i].start;
+    for (; va < segments[i].end; va += PGSIZE) {
+      map(&kas, va, va, 0);
+    }
+  }
+
+  set_satp(kas.ptr);
+  vme_enable = 1;
+
+  return true;
+}
+
+void protect(AddrSpace *as) {
+  PTE *updir = (PTE*)(pgalloc_usr(PGSIZE));
+  as->ptr = updir;
+  as->area = USER_SPACE;
+  as->pgsize = PGSIZE;
+  // map kernel space
+  memcpy(updir, kas.ptr, PGSIZE);
+}
+
+void unprotect(AddrSpace *as) {
+}
+
+void __am_get_cur_as(Context *c) {
+  c->pdir = (vme_enable ? (void *)get_satp() : NULL);
+}
+
+void __am_switch(Context *c) {
+  if (vme_enable && c->pdir != NULL) {
+    set_satp(c->pdir);
+  }
+}
+
+void map(AddrSpace *as, void *va, void *pa, int prot) {
+  uintptr_t vaddr = (uintptr_t)va & ~(uintptr_t)(PGSIZE - 1);
+  uintptr_t paddr = (uintptr_t)pa & ~(uintptr_t)(PGSIZE - 1);
+  PTE *root = (PTE *)as->ptr;
+  uintptr_t vpn1 = (vaddr >> 22) & 0x3ff;
+  uintptr_t vpn0 = (vaddr >> 12) & 0x3ff;
+  if ((root[vpn1] & PTE_V) == 0) {
+    PTE *table = (PTE *)pgalloc_usr(PGSIZE);
+    memset(table, 0, PGSIZE);
+    root[vpn1] = ((((uintptr_t)table) >> 12) << 10) | PTE_V;
+  }
+  PTE *table = (PTE *)((root[vpn1] >> 10) << 12);
+  uintptr_t flags;
+  if (prot == 0) {
+    flags = PTE_R | PTE_W | PTE_X;  // kernel identity mapping from vme_init
+  } else {
+    flags = PTE_R | PTE_X;
+    if (prot & MMAP_WRITE) flags |= PTE_W;
+  }
+  table[vpn0] = ((paddr >> 12) << 10) | flags | PTE_V;
+}
+
+Context *ucontext(AddrSpace *as, Area kstack, void *entry) {
+  uintptr_t end = (uintptr_t)kstack.end & ~(uintptr_t)0xf;
+  Context *c = (Context *)(end - sizeof(Context));
+  memset(c, 0, sizeof(*c));
+  c->mepc = (uintptr_t)entry;
+  c->mstatus = 0x1808;
+  c->pdir = as->ptr;
+  return c;
+}
+''',
+        encoding="ascii",
+    )
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: patch-pa-nemu-ioe.py /path/to/abstract-machine", file=sys.stderr)
@@ -400,6 +524,7 @@ def main() -> int:
     patch_audio(am_home)
     patch_devscan(am_home)
     patch_cte(am_home)
+    patch_vme(am_home)
     patch_klib(am_home)
     return 0
 
