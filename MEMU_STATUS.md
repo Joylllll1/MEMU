@@ -130,6 +130,15 @@ Build and run interactive LiteNES/Mario locally:
 make mario PA_HOME=/path/to/ICS-PA
 ```
 
+Other interactive SDL-window targets (close the window to stop):
+
+```sh
+make snake-sdl     # AM snake, arrow keys + Q
+make typing-sdl    # AM typing-game, type falling letters
+make nslider-sdl   # NSlider slides, J/Down next, K/Up previous
+make bird-sdl      # Flappy Bird, any key to flap
+```
+
 The current LiteNES source does not produce NES APU samples, so no Mario sound
 is expected even though MEMU's AM audio device exists and is tested separately.
 

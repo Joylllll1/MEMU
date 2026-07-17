@@ -59,7 +59,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario memu-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-execve-test pa-vme-test \
+  mario memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-execve-test pa-vme-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -75,6 +75,10 @@ help:
 	@printf '%s\n' '  make dump-regs       Run IMAGE with --batch --dump-regs'
 	@printf '%s\n' '  make self-test       Run built-in smoke program'
 	@printf '%s\n' '  make mario           Build and run LiteNES/Mario in an SDL window'
+	@printf '%s\n' '  make snake-sdl       Play AM snake in an SDL window'
+	@printf '%s\n' '  make typing-sdl      Play AM typing-game in an SDL window'
+	@printf '%s\n' '  make nslider-sdl     Browse NSlider slides in an SDL window'
+	@printf '%s\n' '  make bird-sdl        Play Flappy Bird in an SDL window'
 	@printf '%s\n' '  make test            Run all Makefile tests'
 	@printf '%s\n' '  make expr-test       Run generated expression tests'
 	@printf '%s\n' '  make gen-stage1-image Regenerate tests/images/stage1-trap.bin'
@@ -180,6 +184,22 @@ self-test: $(MEMU)
 
 mario: $(MEMU_SDL)
 	/bin/sh tools/run-pa-mario.sh $(MEMU_SDL) $(PA_HOME)
+
+snake-sdl: $(MEMU_SDL)
+	/bin/sh tools/run-pa-am-app-sdl.sh $(MEMU_SDL) snake $(PA_HOME)
+
+typing-sdl: $(MEMU_SDL)
+	/bin/sh tools/run-pa-am-app-sdl.sh $(MEMU_SDL) typing-game $(PA_HOME)
+
+nslider-sdl: $(MEMU_SDL)
+	PA_NANOS_INTERACTIVE=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
+	PA_NANOS_APP_NAME=nslider PA_NANOS_APP_DIR=apps/nslider PA_NANOS_APP_PATH=/bin/nslider \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU_SDL) $(PA_HOME)
+
+bird-sdl: $(MEMU_SDL)
+	PA_NANOS_INTERACTIVE=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
+	PA_NANOS_APP_NAME=bird PA_NANOS_APP_DIR=apps/bird PA_NANOS_APP_PATH=/bin/bird \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU_SDL) $(PA_HOME)
 
 smoke: $(MEMU)
 	/bin/sh tests/smoke.sh $(MEMU)

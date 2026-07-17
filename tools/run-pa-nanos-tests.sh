@@ -10,6 +10,10 @@ app_dir="${PA_NANOS_APP_DIR:-tests/hello}"
 app_path="${PA_NANOS_APP_PATH:-/bin/hello}"
 ndl="${PA_NANOS_NDL:-0}"
 vme="${PA_NANOS_VME:-0}"
+interactive="${PA_NANOS_INTERACTIVE:-0}"
+if [ "${interactive}" = 1 ]; then
+  max_instr="${PA_NANOS_MAX_INSTR:-18446744073709551615}"
+fi
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 if [ -z "${pa_home}" ]; then
@@ -148,11 +152,31 @@ PATH="${shim_dir}:$PATH" make -s -C "${nanos_home}" \
 key_args=""
 case "${app_name}" in
   nslider)
-    key_events_file="${tmp_root}/key-events.txt"
-    printf 'kd DOWN\nku DOWN\nkd J\nku J\n' > "${key_events_file}"
-    key_args="--key-events ${key_events_file}"
+    if [ "${interactive}" != 1 ]; then
+      key_events_file="${tmp_root}/key-events.txt"
+      printf 'kd DOWN\nku DOWN\nkd J\nku J\n' > "${key_events_file}"
+      key_args="--key-events ${key_events_file}"
+    fi
     ;;
 esac
+
+if [ "${interactive}" = 1 ]; then
+  case "${app_name}" in
+    nslider)
+      echo "NSlider controls: J/Down next slide, K/Up previous slide, digits+G go to slide."
+      ;;
+    bird)
+      echo "Flappy Bird controls: press any key to flap."
+      ;;
+  esac
+  echo "Close the SDL window to stop MEMU."
+  status=0
+  "${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --sdl --max-instr "${max_instr}" || status=$?
+  if [ "${status}" -ne 0 ]; then
+    echo "MEMU ${app_name} stopped (exit ${status})."
+  fi
+  exit 0
+fi
 
 status=0
 output="$("${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --max-instr "${max_instr}" ${key_args} 2>&1)" || status=$?
