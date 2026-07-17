@@ -29,6 +29,12 @@ static uint8_t fb[MEMU_FB_SIZE];
 static uint8_t audio_sbuf[MEMU_AUDIO_SBUF_SIZE];
 static uint32_t audio_regs[6];
 
+/* Input injection queue — usable in both SDL and non-SDL modes. */
+#define INJECT_QUEUE_SIZE 256
+static uint32_t inject_queue[INJECT_QUEUE_SIZE];
+static size_t inject_head = 0;
+static size_t inject_tail = 0;
+
 enum {
   AM_KEY_NONE = 0,
   AM_KEY_ESCAPE = 1,
@@ -46,6 +52,23 @@ enum {
   AM_KEY_LEFT = 75,
   AM_KEY_RIGHT = 76,
 };
+
+static void inject_push(uint32_t event) {
+  size_t next = (inject_tail + 1u) % INJECT_QUEUE_SIZE;
+  if (next != inject_head) {
+    inject_queue[inject_tail] = event;
+    inject_tail = next;
+  }
+}
+
+static uint32_t inject_pop(void) {
+  if (inject_head == inject_tail) {
+    return AM_KEY_NONE;
+  }
+  uint32_t event = inject_queue[inject_head];
+  inject_head = (inject_head + 1u) % INJECT_QUEUE_SIZE;
+  return event;
+}
 
 #ifdef MEMU_ENABLE_SDL
 #define KBD_QUEUE_SIZE 64
@@ -327,9 +350,9 @@ static void rtc_write(uint32_t addr, int len, uint32_t data) {
 
 static uint32_t kbd_read(uint32_t addr, int len) {
   MEMU_ASSERT(len == 4, "keyboard supports only 32-bit reads, got len=%d", len);
-  uint32_t data = 0;
+  uint32_t data = inject_pop();
 #ifdef MEMU_ENABLE_SDL
-  if (sdl_requested) {
+  if (data == 0 && sdl_requested) {
     device_poll();
     data = kbd_pop();
   }
@@ -558,6 +581,10 @@ bool device_poll(void) {
 }
 
 uint32_t device_read_key_event(void) {
+  uint32_t injected = inject_pop();
+  if (injected != AM_KEY_NONE) {
+    return injected;
+  }
 #ifdef MEMU_ENABLE_SDL
   if (sdl_requested) {
     device_poll();
@@ -600,6 +627,59 @@ const char *device_key_name(uint32_t event) {
     default:
       return NULL;
   }
+}
+
+uint32_t device_key_code(const char *name) {
+  static const struct {
+    const char *name;
+    uint32_t code;
+  } table[] = {
+    {"ESCAPE", AM_KEY_ESCAPE},
+    {"Q", AM_KEY_Q},
+    {"W", AM_KEY_W},
+    {"U", AM_KEY_U},
+    {"I", AM_KEY_I},
+    {"A", AM_KEY_A},
+    {"S", AM_KEY_S},
+    {"D", AM_KEY_D},
+    {"J", AM_KEY_J},
+    {"K", AM_KEY_K},
+    {"UP", AM_KEY_UP},
+    {"DOWN", AM_KEY_DOWN},
+    {"LEFT", AM_KEY_LEFT},
+    {"RIGHT", AM_KEY_RIGHT},
+  };
+  for (size_t i = 0; i < MEMU_ARRAY_LEN(table); i++) {
+    if (strcmp(name, table[i].name) == 0) {
+      return table[i].code;
+    }
+  }
+  return AM_KEY_NONE;
+}
+
+void device_inject_key_events_from_file(const char *path) {
+  FILE *f = fopen(path, "r");
+  MEMU_ASSERT(f != NULL, "cannot open key events file: %s", path);
+  char line[64];
+  while (fgets(line, sizeof(line), f) != NULL) {
+    char state[8], name[32];
+    if (sscanf(line, "%7s %31s", state, name) != 2) {
+      continue;
+    }
+    uint32_t code = device_key_code(name);
+    if (code == AM_KEY_NONE) {
+      fprintf(stderr, "MEMU: ignoring unknown key in events file: %s\n", name);
+      continue;
+    }
+    uint32_t event = code;
+    if (strcmp(state, "kd") == 0) {
+      event |= MEMU_KEYDOWN_MASK;
+    }
+    inject_push(event);
+  }
+  fclose(f);
+  printf("MEMU: injected %zu key events from %s\n",
+         (inject_tail - inject_head + INJECT_QUEUE_SIZE) % INJECT_QUEUE_SIZE, path);
 }
 
 bool device_in_range(uint32_t addr, uint32_t len) {

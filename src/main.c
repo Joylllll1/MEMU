@@ -17,6 +17,7 @@ typedef struct {
   const char *run_path;
   const char **batch_programs;
   int batch_program_count;
+  const char *key_events_path;
   bool batch;
   bool self_test;
   bool dump_regs;
@@ -45,6 +46,7 @@ static void print_help(const char *argv0) {
   puts("  --trace-device      Print MMIO device reads and writes");
   puts("  --trace-syscall     Print syscall number, arguments, and return value");
   puts("  --sdl               Show framebuffer in an SDL window and enable keyboard");
+  puts("  --key-events PATH   Inject keyboard events from file for batch testing");
   puts("  --max-instr N       Stop after N guest instructions");
 }
 
@@ -63,6 +65,7 @@ static Options parse_args(int argc, char **argv) {
     .run_path = NULL,
     .batch_programs = NULL,
     .batch_program_count = 0,
+    .key_events_path = NULL,
     .batch = false,
     .self_test = false,
     .dump_regs = false,
@@ -112,6 +115,9 @@ static Options parse_args(int argc, char **argv) {
       opt.trace_syscall = true;
     } else if (strcmp(argv[i], "--sdl") == 0) {
       opt.sdl = true;
+    } else if (strcmp(argv[i], "--key-events") == 0) {
+      MEMU_ASSERT(i + 1 < argc, "--key-events requires PATH");
+      opt.key_events_path = argv[++i];
     } else if (strcmp(argv[i], "--max-instr") == 0) {
       MEMU_ASSERT(i + 1 < argc, "--max-instr requires N");
       opt.max_instr = parse_u64(argv[++i]);
@@ -183,6 +189,9 @@ int main(int argc, char **argv) {
   memu.trace_syscall = opt.trace_syscall;
   device_set_trace(opt.trace_device);
   device_set_sdl(opt.sdl);
+  if (opt.key_events_path != NULL) {
+    device_inject_key_events_from_file(opt.key_events_path);
+  }
 
   if (opt.ramdisk_path != NULL) {
     fs_load_ramdisk(&fs, opt.ramdisk_path);

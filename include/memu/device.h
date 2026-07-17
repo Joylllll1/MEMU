@@ -24,6 +24,8 @@ void device_set_sdl(bool enabled);
 bool device_poll(void);
 uint32_t device_read_key_event(void);
 const char *device_key_name(uint32_t event);
+uint32_t device_key_code(const char *name);
+void device_inject_key_events_from_file(const char *path);
 bool device_in_range(uint32_t addr, uint32_t len);
 uint32_t device_read(uint32_t addr, int len);
 void device_write(uint32_t addr, int len, uint32_t data);

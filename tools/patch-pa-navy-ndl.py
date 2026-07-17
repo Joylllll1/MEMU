@@ -57,6 +57,7 @@ void NDL_DrawRect(uint32_t *pixels, int x, int y, int w, int h) {
     if (lseek(fbdev, offset, SEEK_SET) < 0) return;
     if (write(fbdev, pixels + row * w, (size_t)w * sizeof(uint32_t)) < 0) return;
   }
+  *(volatile uint32_t *)0xa0000104 = 1;
 }
 
 void NDL_OpenAudio(int freq, int channels, int samples) {

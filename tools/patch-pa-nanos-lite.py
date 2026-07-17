@@ -204,7 +204,6 @@ size_t fb_write(const void *buf, size_t offset, size_t len) {
     pixel_offset += n;
     nr_pixels -= n;
   }
-  io_write(AM_GPU_FBDRAW, 0, 0, NULL, 0, 0, true);
   return len;
 }
 
@@ -581,8 +580,7 @@ void call_main(uintptr_t *args) {
         encoding="ascii",
     )
 
-    (navy / "libs/libos/src/syscall.c").write_text(
-        r'''#include <stdint.h>
+    syscall_common = r'''#include <stdint.h>
 #include <stddef.h>
 #include "syscall.h"
 
@@ -591,11 +589,6 @@ typedef long off_t;
 typedef int mode_t;
 typedef int pid_t;
 typedef long clock_t;
-
-struct timeval {
-  long tv_sec;
-  long tv_usec;
-};
 
 struct timezone;
 struct stat {
@@ -694,7 +687,21 @@ int _gettimeofday(struct timeval *tv, struct timezone *tz) {
   (void)tz;
   return _syscall_(SYS_gettimeofday, (intptr_t)tv, 0, 0);
 }
+'''
 
+    snprintf_stub = r'''
+#include <stdarg.h>
+int vsnprintf(char *out, size_t n, const char *fmt, va_list ap);
+int snprintf(char *out, size_t n, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int ret = vsnprintf(out, n, fmt, ap);
+  va_end(ap);
+  return ret;
+}
+'''
+
+    syscall_suffix = r'''
 int _execve(const char *fname, char * const argv[], char *const envp[]) {
   (void)fname; (void)argv; (void)envp;
   return -1;
@@ -769,9 +776,14 @@ unsigned int sleep(unsigned int seconds) {
   (void)seconds;
   return 0;
 }
-''',
-        encoding="ascii",
-    )
+'''
+
+    syscall_text = syscall_common
+    if with_libc:
+        syscall_text += snprintf_stub
+    syscall_text += syscall_suffix
+
+    (navy / "libs/libos/src/syscall.c").write_text(syscall_text, encoding="ascii")
 
 
 def patch_libc(navy: Path) -> None:

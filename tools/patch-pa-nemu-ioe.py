@@ -276,6 +276,122 @@ int atomic_xchg(int *addr, int newval) {
     )
 
 
+def patch_klib(am_home: Path) -> None:
+    stdio = am_home / "klib/src/stdio.c"
+    text = stdio.read_text(encoding="ascii")
+
+    old_snprintf = '''int snprintf(char *out, size_t n, const char *fmt, ...) {
+  panic("Not implemented");
+}
+
+int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
+  panic("Not implemented");
+}'''
+
+    new_snprintf = r'''static int vsnprintf_impl(char *out, size_t n, const char *fmt, va_list ap) {
+  const char *p = fmt;
+  char *res = out;
+  char *end = out + n;
+  bool flag = false;
+  while (*p != '\0') {
+    if (flag) {
+      int width = 0;
+      if (*p == '0') {
+        p++;
+        while (*p >= '0' && *p <= '9') {
+          width = width * 10 + (*p - '0');
+          p++;
+        }
+      }
+      switch (*p) {
+        case 'd': {
+          int d = va_arg(ap, int);
+          int isneg = 0;
+          if (d < 0) {
+            isneg = 1;
+            if (d == -2147483648) {
+              if (out < end) { *out = '-'; out++; }
+              int digit = 11;
+              int pad = width - digit;
+              while (pad > 0 && out < end) { *out = '0'; out++; pad--; }
+              const char *s = "2147483648";
+              while (*s && out < end) { *out = *s; out++; s++; }
+              break;
+            }
+            d = -d;
+          }
+          int v = d, digit = (v == 0) ? 1 : 0;
+          while (v > 0) { v /= 10; digit++; }
+          int pad = width - digit - isneg;
+          if (isneg && out < end) { *out = '-'; out++; }
+          while (pad > 0 && out < end) { *out = '0'; out++; pad--; }
+          char tmp[12]; int ti = 0;
+          do { tmp[ti++] = '0' + (d % 10); d /= 10; } while (d > 0);
+          while (ti > 0 && out < end) { out++; ti--; *((out - 1)) = tmp[ti]; }
+          break;
+        }
+        case 's': {
+          char *s = va_arg(ap, char *);
+          if (s == NULL) s = (char *)"(null)";
+          while (*s != '\0' && out < end) { *out = *s; out++; s++; }
+          break;
+        }
+        case 'c': {
+          int c = va_arg(ap, int);
+          if (out < end) { *out = (char)c; out++; }
+          break;
+        }
+        case 'x':
+        case 'p': {
+          unsigned u = va_arg(ap, unsigned);
+          char hex[16]; int hi = 0;
+          do { int v = u & 0xf; hex[hi++] = (char)(v < 10 ? '0' + v : 'a' + v - 10); u >>= 4; } while (u > 0);
+          int pad = width - hi;
+          while (pad > 0 && out < end) { *out = '0'; out++; pad--; }
+          while (hi > 0 && out < end) { hi--; *out = hex[hi]; out++; }
+          break;
+        }
+        case 'l':
+          if (*(p + 1) == 'd' || *(p + 1) == 'u' || *(p + 1) == 'x') {
+            p++;
+            goto default_case;
+          }
+          goto default_case;
+        default: default_case:
+          if (out < end) { *out = *p; out++; }
+          break;
+      }
+      flag = false;
+      p++;
+      continue;
+    }
+    if (*p == '%') { flag = true; p++; continue; }
+    if (out < end) { *out = *p; out++; }
+    p++;
+  }
+  if (out < end) *out = '\0';
+  else if (n > 0) *(end - 1) = '\0';
+  return (int)(out - res);
+}
+
+int snprintf(char *out, size_t n, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int ret = vsnprintf_impl(out, n, fmt, ap);
+  va_end(ap);
+  return ret;
+}
+
+int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
+  return vsnprintf_impl(out, n, fmt, ap);
+}'''
+
+    if old_snprintf not in text:
+        raise SystemExit("missing snprintf/vsnprintf stubs in AM klib stdio.c")
+    text = text.replace(old_snprintf, new_snprintf)
+    stdio.write_text(text, encoding="ascii")
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: patch-pa-nemu-ioe.py /path/to/abstract-machine", file=sys.stderr)
@@ -284,6 +400,7 @@ def main() -> int:
     patch_audio(am_home)
     patch_devscan(am_home)
     patch_cte(am_home)
+    patch_klib(am_home)
     return 0
 
 

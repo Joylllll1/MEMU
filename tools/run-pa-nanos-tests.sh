@@ -79,16 +79,12 @@ fi
 
 ramdisk_apps=""
 ramdisk_tests="dummy"
+key_events_file=""
 case "${app_dir}" in
   apps/*)
     ramdisk_apps="${app_dir#apps/}"
     mkdir -p "${navy_home}/fsimg/share/slides"
-    i=0
-    while [ "${i}" -lt 10 ]; do
-      cp "${navy_home}/fsimg/share/pictures/projectn.bmp" \
-        "${navy_home}/fsimg/share/slides/slides-${i}.bmp"
-      i=$((i + 1))
-    done
+    python3 "${script_dir}/mkbin/gen_slides.py" "${navy_home}/fsimg/share/slides" 10
     ;;
   tests/*)
     ramdisk_tests="dummy ${app_dir#tests/}"
@@ -109,8 +105,17 @@ PATH="${shim_dir}:$PATH" make -s -C "${nanos_home}" \
   ARCH=riscv32-nemu CROSS_COMPILE=riscv64-unknown-elf- \
   AM_HOME="${am_home}" NAVY_HOME="${navy_home}" HAS_NAVY=1
 
+key_args=""
+case "${app_name}" in
+  nslider)
+    key_events_file="${tmp_root}/key-events.txt"
+    printf 'kd DOWN\nku DOWN\nkd J\nku J\n' > "${key_events_file}"
+    key_args="--key-events ${key_events_file}"
+    ;;
+esac
+
 status=0
-output="$("${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --max-instr "${max_instr}" 2>&1)" || status=$?
+output="$("${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --max-instr "${max_instr}" ${key_args} 2>&1)" || status=$?
 printf '%s\n' "${output}" > "${tmp_root}/run-nanos.log"
 
 require_output() {
@@ -139,6 +144,20 @@ case "${app_name}" in
   nslider)
     require_output "framebuffer checksum"
     require_output "instruction limit reached"
+    checksum_count=$(grep -c 'framebuffer checksum' "${tmp_root}/run-nanos.log" || true)
+    if [ "${checksum_count}" -lt 2 ]; then
+      echo "FAIL nanos-lite-nslider: expected at least 2 framebuffer checksums (slide navigation), got ${checksum_count}"
+      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      exit 1
+    fi
+    first_cs=$(grep 'framebuffer checksum' "${tmp_root}/run-nanos.log" | head -1 | sed 's/.*checksum //')
+    second_cs=$(grep 'framebuffer checksum' "${tmp_root}/run-nanos.log" | head -2 | tail -1 | sed 's/.*checksum //')
+    if [ "${first_cs}" = "${second_cs}" ]; then
+      echo "FAIL nanos-lite-nslider: framebuffer checksums unchanged after key injection (both ${first_cs})"
+      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      exit 1
+    fi
+    echo "NSlider navigation OK: checksums differ (${first_cs} vs ${second_cs})"
     ;;
   event-test)
     require_output "instruction limit reached"
