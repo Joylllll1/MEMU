@@ -58,7 +58,7 @@ SRCS := \
   src/isa/rv32i.c
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
-  stage4-test stage5-test stage6-test stage7-test toolchain-test runner-test run monitor batch self-test dump-regs \
+  stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
   mario memu-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-execve-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
@@ -87,6 +87,7 @@ help:
 	@printf '%s\n' '  make stage5-test     Run MMIO serial/timer/kbd/fb tests'
 	@printf '%s\n' '  make stage6-test     Run syscall and batch-list tests'
 	@printf '%s\n' '  make stage7-test     Run ramdisk/fs loader tests'
+	@printf '%s\n' '  make stage8-test     Run Sv32 mp-os and page-fault tests'
 	@printf '%s\n' '  make toolchain-test  Build and run RV32 toolchain ELF tests'
 	@printf '%s\n' '  make pa-cpu-tests    Build and run real PA cpu-tests with PA_HOME=/path/to/ICS-PA'
 	@printf '%s\n' '  make pa-am-tests     Build and run real PA AM hello/timer/intr/kbd/display tests'
@@ -206,6 +207,9 @@ stage6-test: $(MEMU) $(STAGE6_IMAGES)
 stage7-test: $(MEMU) $(STAGE7_IMAGES)
 	/bin/sh tests/fs/run_stage7.sh $(MEMU) .
 
+stage8-test: $(MEMU)
+	/bin/sh tests/vm/run_stage8.sh $(MEMU) .
+
 toolchain-test: $(MEMU) $(TOOLCHAIN_IMAGES)
 	/bin/sh tests/toolchain/run_toolchain.sh $(MEMU) .
 
@@ -253,7 +257,7 @@ pa-execve-test: $(MEMU)
 runner-test: $(MEMU) $(STAGE1_IMAGE) $(STAGE3_IMAGES) $(STAGE4_IMAGES) $(STAGE5_IMAGES) $(STAGE6_IMAGES) $(STAGE7_IMAGES) $(TOOLCHAIN_IMAGES)
 	/bin/sh tools/run-tests.sh $(MEMU)
 
-test: smoke stage1-test monitor-test expr-test rv32i-test stage4-test stage5-test stage6-test stage7-test toolchain-test runner-test
+test: smoke stage1-test monitor-test expr-test rv32i-test stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test
 
 cmake-configure:
 	cmake -S . -B $(CMAKE_BUILD_DIR)

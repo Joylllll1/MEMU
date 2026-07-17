@@ -65,5 +65,10 @@ fi
 
 for elf in tests/images/*.elf; do
   [ -e "$elf" ] || continue
+  case "$elf" in
+    # Stage 8 kernels need >100k instructions or fault on purpose; they are
+    # covered by tests/vm/run_stage8.sh instead.
+    */mp-os.elf|*/vm-fault.elf) continue ;;
+  esac
   run_elf "$elf"
 done
