@@ -33,15 +33,25 @@ if ! command -v "${cross}gcc" >/dev/null 2>&1; then
   exit 1
 fi
 
-tmp_root="${TMPDIR:-/tmp}/memu-am-sdl.$$"
-mkdir -p "${tmp_root}"
-trap 'rm -rf "${tmp_root}"' EXIT
+cache_root="${MEMU_PA_CACHE_DIR:-${HOME}/.cache/memu-pa}"
+work_root="${cache_root}/am-${app}"
+stamp_file="${work_root}/.memu-stamp"
+fingerprint="$({ cat "$0" "${script_dir}/patch-pa-nemu-ioe.py"; echo "${pa_home}"; } | cksum)"
+if [ "${MEMU_PA_FRESH:-0}" = 1 ] ||
+   [ ! -f "${stamp_file}" ] ||
+   [ "$(cat "${stamp_file}")" != "${fingerprint}" ]; then
+  rm -rf "${work_root}"
+  mkdir -p "${work_root}"
+  printf '%s' "${fingerprint}" > "${stamp_file}"
+else
+  echo "MEMU: reusing cached PA build in ${work_root} (MEMU_PA_FRESH=1 forces a clean rebuild)"
+fi
 
-rsync -a --exclude .git "${pa_home}/abstract-machine/" "${tmp_root}/abstract-machine/"
-rsync -a --exclude .git "${pa_home}/am-kernels/" "${tmp_root}/am-kernels/"
+rsync -a --exclude .git "${pa_home}/abstract-machine/" "${work_root}/abstract-machine/"
+rsync -a --exclude .git "${pa_home}/am-kernels/" "${work_root}/am-kernels/"
 
-am_home="${tmp_root}/abstract-machine"
-kernel_home="${tmp_root}/am-kernels/kernels/${app}"
+am_home="${work_root}/abstract-machine"
+kernel_home="${work_root}/am-kernels/kernels/${app}"
 
 # macOS ships GNU Make 3.81, which does not expand this newer define syntax.
 if grep -q '^define LIB_TEMPLATE =' "${am_home}/Makefile"; then

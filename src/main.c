@@ -143,6 +143,7 @@ static void load_builtin_self_test(void) {
 static int state_to_exit_code(MEMUState state) {
   switch (state) {
     case MEMU_STATE_GOOD_TRAP:
+    case MEMU_STATE_QUIT:
       return 0;
     case MEMU_STATE_BAD_TRAP:
     case MEMU_STATE_ABORT:
@@ -166,6 +167,9 @@ static void print_final_state(const MEMU *memu) {
       printf("MEMU ABORT after %llu instructions\n",
              (unsigned long long)memu->instr_count);
       break;
+    case MEMU_STATE_QUIT:
+      printf("MEMU: window closed, bye\n");
+      return;
     case MEMU_STATE_RUNNING:
       printf("MEMU stopped while still running\n");
       break;

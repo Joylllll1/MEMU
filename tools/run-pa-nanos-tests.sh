@@ -44,25 +44,44 @@ if ! command -v riscv64-unknown-elf-gcc >/dev/null 2>&1; then
   exit 1
 fi
 
-tmp_root="${TMPDIR:-/tmp}/memu-pa-nanos-tests.$$"
-shim_dir="${tmp_root}/shim"
-mkdir -p "${tmp_root}" "${shim_dir}"
-trap 'rm -rf "${tmp_root}"' EXIT
+# Persistent per-configuration build cache: newlib and other Navy libraries
+# are only rebuilt from scratch when the patch tooling or PA_HOME changes.
+cache_root="${MEMU_PA_CACHE_DIR:-${HOME}/.cache/memu-pa}"
+work_root="${cache_root}/nanos-libc${full_libc}-ndl${ndl}-vme${vme}-${app_name}"
+stamp_file="${work_root}/.memu-stamp"
+fingerprint="$({ cat "$0" \
+      "${script_dir}/patch-pa-nemu-ioe.py" \
+      "${script_dir}/patch-pa-nanos-lite.py" \
+      "${script_dir}/patch-pa-navy-ndl.py" \
+      "${script_dir}/mkbin/gen_slides.py" \
+      "${script_dir}/mkbin/convert_slides.py"; \
+    echo "${pa_home}"; } | cksum)"
+if [ "${MEMU_PA_FRESH:-0}" = 1 ] ||
+   [ ! -f "${stamp_file}" ] ||
+   [ "$(cat "${stamp_file}")" != "${fingerprint}" ]; then
+  rm -rf "${work_root}"
+  mkdir -p "${work_root}"
+  printf '%s' "${fingerprint}" > "${stamp_file}"
+else
+  echo "MEMU: reusing cached PA build in ${work_root} (MEMU_PA_FRESH=1 forces a clean rebuild)"
+fi
+shim_dir="${work_root}/shim"
+mkdir -p "${shim_dir}"
 
 for tool in gcc g++ ld ar as objcopy objdump ranlib strip; do
   src="$(command -v "riscv64-unknown-elf-${tool}" || true)"
   if [ -n "${src}" ]; then
-    ln -s "${src}" "${shim_dir}/riscv64-linux-gnu-${tool}"
+    ln -sf "${src}" "${shim_dir}/riscv64-linux-gnu-${tool}"
   fi
 done
 
-rsync -a --exclude .git "${pa_home}/abstract-machine/" "${tmp_root}/abstract-machine/"
-rsync -a --exclude .git "${pa_home}/nanos-lite/" "${tmp_root}/nanos-lite/"
-rsync -a --exclude .git "${pa_home}/navy-apps/" "${tmp_root}/navy-apps/"
+rsync -a --exclude .git "${pa_home}/abstract-machine/" "${work_root}/abstract-machine/"
+rsync -a --exclude .git "${pa_home}/nanos-lite/" "${work_root}/nanos-lite/"
+rsync -a --exclude .git "${pa_home}/navy-apps/" "${work_root}/navy-apps/"
 
-am_home="${tmp_root}/abstract-machine"
-nanos_home="${tmp_root}/nanos-lite"
-navy_home="${tmp_root}/navy-apps"
+am_home="${work_root}/abstract-machine"
+nanos_home="${work_root}/nanos-lite"
+navy_home="${work_root}/navy-apps"
 
 # macOS ships GNU Make 3.81, which does not expand this newer define syntax.
 if grep -q '^define LIB_TEMPLATE =' "${am_home}/Makefile"; then
@@ -110,7 +129,25 @@ case "${app_dir}" in
   apps/*)
     ramdisk_apps="${app_dir#apps/}"
     mkdir -p "${navy_home}/fsimg/share/slides"
-    python3 "${script_dir}/mkbin/gen_slides.py" "${navy_home}/fsimg/share/slides" 10
+    if [ "${app_name}" = "nslider" ] && [ -n "${NSLIDER_SLIDES:-}" ]; then
+      # Expand a literal leading ~ (zsh does not expand it in make arguments).
+      case "${NSLIDER_SLIDES}" in
+        "~") NSLIDER_SLIDES="${HOME}" ;;
+        "~/"*) NSLIDER_SLIDES="${HOME}${NSLIDER_SLIDES#\~}" ;;
+      esac
+      if [ ! -d "${NSLIDER_SLIDES}" ]; then
+        echo "NSLIDER_SLIDES is not a directory: ${NSLIDER_SLIDES}" >&2
+        exit 1
+      fi
+      slide_count="$(python3 "${script_dir}/mkbin/convert_slides.py" \
+        "${NSLIDER_SLIDES}" "${navy_home}/fsimg/share/slides")"
+      echo "MEMU: using ${slide_count} slides from ${NSLIDER_SLIDES}"
+      perl -pi -e "s/^const int N = \\d+;/const int N = ${slide_count};/" \
+        "${navy_home}/${app_dir}/src/main.cpp"
+    else
+      rm -f "${navy_home}/fsimg/share/slides/"slides-*.bmp
+      python3 "${script_dir}/mkbin/gen_slides.py" "${navy_home}/fsimg/share/slides" 10
+    fi
     if [ "${app_name}" = "bird" ]; then
       awk '/^include.*NAVY_HOME/{print "CFLAGS += -D_GNU_SOURCE"}1' "${navy_home}/apps/bird/Makefile" > "${navy_home}/apps/bird/Makefile.tmp" && mv "${navy_home}/apps/bird/Makefile.tmp" "${navy_home}/apps/bird/Makefile"
     fi
@@ -153,7 +190,7 @@ key_args=""
 case "${app_name}" in
   nslider)
     if [ "${interactive}" != 1 ]; then
-      key_events_file="${tmp_root}/key-events.txt"
+      key_events_file="${work_root}/key-events.txt"
       printf 'kd DOWN\nku DOWN\nkd J\nku J\n' > "${key_events_file}"
       key_args="--key-events ${key_events_file}"
     fi
@@ -180,13 +217,13 @@ fi
 
 status=0
 output="$("${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --max-instr "${max_instr}" ${key_args} 2>&1)" || status=$?
-printf '%s\n' "${output}" > "${tmp_root}/run-nanos.log"
+printf '%s\n' "${output}" > "${work_root}/run-nanos.log"
 
 require_output() {
   pattern="$1"
-  if ! grep -q "${pattern}" "${tmp_root}/run-nanos.log"; then
+  if ! grep -q "${pattern}" "${work_root}/run-nanos.log"; then
     echo "FAIL nanos-lite: missing pattern: ${pattern}"
-    sed -n '1,120p' "${tmp_root}/run-nanos.log"
+    sed -n '1,120p' "${work_root}/run-nanos.log"
     exit 1
   fi
 }
@@ -208,17 +245,17 @@ case "${app_name}" in
   nslider)
     require_output "framebuffer checksum"
     require_output "instruction limit reached"
-    checksum_count=$(grep -c 'framebuffer checksum' "${tmp_root}/run-nanos.log" || true)
+    checksum_count=$(grep -c 'framebuffer checksum' "${work_root}/run-nanos.log" || true)
     if [ "${checksum_count}" -lt 2 ]; then
       echo "FAIL nanos-lite-nslider: expected at least 2 framebuffer checksums (slide navigation), got ${checksum_count}"
-      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      sed -n '1,120p' "${work_root}/run-nanos.log"
       exit 1
     fi
-    first_cs=$(grep 'framebuffer checksum' "${tmp_root}/run-nanos.log" | head -1 | sed 's/.*checksum //')
-    second_cs=$(grep 'framebuffer checksum' "${tmp_root}/run-nanos.log" | head -2 | tail -1 | sed 's/.*checksum //')
+    first_cs=$(grep 'framebuffer checksum' "${work_root}/run-nanos.log" | head -1 | sed 's/.*checksum //')
+    second_cs=$(grep 'framebuffer checksum' "${work_root}/run-nanos.log" | head -2 | tail -1 | sed 's/.*checksum //')
     if [ "${first_cs}" = "${second_cs}" ]; then
       echo "FAIL nanos-lite-nslider: framebuffer checksums unchanged after key injection (both ${first_cs})"
-      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      sed -n '1,120p' "${work_root}/run-nanos.log"
       exit 1
     fi
     echo "NSlider navigation OK: checksums differ (${first_cs} vs ${second_cs})"
@@ -232,18 +269,18 @@ case "${app_name}" in
   execve-test)
     require_output "execve-test: before execve"
     require_output "Hello World"
-    if grep -q "FAIL: execve returned" "${tmp_root}/run-nanos.log"; then
+    if grep -q "FAIL: execve returned" "${work_root}/run-nanos.log"; then
       echo "FAIL execve-test: execve returned instead of replacing program"
-      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      sed -n '1,120p' "${work_root}/run-nanos.log"
       exit 1
     fi
     ;;
   bird)
-    if grep -q "instruction limit reached" "${tmp_root}/run-nanos.log"; then
+    if grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then
       echo "Bird ran without crashing (instruction limit reached)"
     else
       echo "FAIL bird: did not reach instruction limit (likely crashed)"
-      sed -n '1,120p' "${tmp_root}/run-nanos.log"
+      sed -n '1,120p' "${work_root}/run-nanos.log"
       exit 1
     fi
     ;;

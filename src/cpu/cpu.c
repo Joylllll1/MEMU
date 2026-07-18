@@ -68,7 +68,7 @@ void cpu_exec(MEMU *memu, uint64_t max_instr) {
     memu->instr_count++;
     executed++;
     if ((executed & UINT64_C(0x3fff)) == 0 && !device_poll()) {
-      memu->state = MEMU_STATE_ABORT;
+      memu->state = MEMU_STATE_QUIT;
       break;
     }
 #ifndef MEMU_FAST_RUN

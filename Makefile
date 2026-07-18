@@ -78,6 +78,7 @@ help:
 	@printf '%s\n' '  make snake-sdl       Play AM snake in an SDL window'
 	@printf '%s\n' '  make typing-sdl      Play AM typing-game in an SDL window'
 	@printf '%s\n' '  make nslider-sdl     Browse NSlider slides in an SDL window'
+	@printf '%s\n' '                       (NSLIDER_SLIDES=/path/to/images uses your own slides)'
 	@printf '%s\n' '  make bird-sdl        Play Flappy Bird in an SDL window'
 	@printf '%s\n' '  make test            Run all Makefile tests'
 	@printf '%s\n' '  make expr-test       Run generated expression tests'
@@ -113,6 +114,9 @@ help:
 	@printf '%s\n' '  IMAGE=path/to.bin    Guest raw image, default tests/images/stage1-trap.bin'
 	@printf '%s\n' '  RUN_ARGS="..."       Extra memu arguments'
 	@printf '%s\n' '  BUILD_DIR=dir        Make build directory'
+	@printf '%s\n' '  NSLIDER_SLIDES=dir   Images to convert into NSlider slides (nslider-sdl)'
+	@printf '%s\n' '  MEMU_PA_FRESH=1      Force a clean rebuild of the cached PA trees'
+	@printf '%s\n' '  MEMU_PA_CACHE_DIR=dir PA build cache location, default ~/.cache/memu-pa'
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -194,6 +198,7 @@ typing-sdl: $(MEMU_SDL)
 nslider-sdl: $(MEMU_SDL)
 	PA_NANOS_INTERACTIVE=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
 	PA_NANOS_APP_NAME=nslider PA_NANOS_APP_DIR=apps/nslider PA_NANOS_APP_PATH=/bin/nslider \
+	NSLIDER_SLIDES="$(NSLIDER_SLIDES)" \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU_SDL) $(PA_HOME)
 
 bird-sdl: $(MEMU_SDL)

@@ -130,29 +130,49 @@ Build and run interactive LiteNES/Mario locally:
 make mario PA_HOME=/path/to/ICS-PA
 ```
 
-Other interactive SDL-window targets (close the window to stop):
+Other interactive SDL-window targets (close the window to stop; closing the
+window is a clean exit, not an error):
 
 ```sh
 make snake-sdl     # AM snake, arrow keys + Q
 make typing-sdl    # AM typing-game, type falling letters
-make nslider-sdl   # NSlider slides, J/Down next, K/Up previous
-make bird-sdl      # Flappy Bird, any key to flap
+make nslider-sdl   # NSlider slides, J/Down next, K/Up previous, digits+G goto
+make bird-sdl      # Flappy Bird, any key to flap (title screen appears after
+                   # a short PNG-decoding delay)
 ```
+
+Show your own slides in NSlider (images are resized to 400x300 via sips and
+converted to the BMP format libbmp expects):
+
+```sh
+make nslider-sdl NSLIDER_SLIDES=/path/to/images
+```
+
+The PA compatibility builds are cached per configuration under
+`~/.cache/memu-pa` (override with `MEMU_PA_CACHE_DIR`), so repeated runs skip
+the newlib rebuild and take seconds. The cache is invalidated automatically
+when the patch tooling changes; `MEMU_PA_FRESH=1` forces a clean rebuild.
 
 The current LiteNES source does not produce NES APU samples, so no Mario sound
 is expected even though MEMU's AM audio device exists and is tested separately.
 
 ## Current Compatibility Implementation
 
-The real PA compatibility scripts copy the PA trees into a temporary directory
-and patch only those copies. They do not modify the PA checkout:
+The real PA compatibility scripts sync the PA trees into a persistent
+per-configuration cache directory (`~/.cache/memu-pa`) and patch only those
+copies. They do not modify the PA checkout, and library builds (newlib in
+particular) are reused across runs:
 
 - `tools/run-pa-nanos-tests.sh`: selects a Navy app/test, builds the temporary
   ramdisk, builds Nanos-lite, boots it on MEMU, and checks output.
-- `tools/patch-pa-nanos-lite.py`: adapts temporary Nanos-lite/Navy trees to
+- `tools/patch-pa-nanos-lite.py`: adapts cached Nanos-lite/Navy trees to
   MEMU's current syscall, loader, and full-libc path.
 - `tools/patch-pa-navy-ndl.py`: supplies the current syscall-backed NDL and
-  miniSDL timer/event/video implementation for the bounded NSlider smoke.
+  miniSDL timer/event/video implementation. NDL centers the canvas on the
+  400x300 display and scales oversized canvases down to fit (Flappy Bird's
+  287x400 canvas renders letterboxed at 215x300).
+- `tools/mkbin/convert_slides.py`: converts user images into
+  libbmp-compatible 400x300 slides for `NSLIDER_SLIDES`.
 - `Makefile`: exposes `pa-nanos-libc-test` and `pa-navy-ndl-test` in addition to
   the local stage targets.
 

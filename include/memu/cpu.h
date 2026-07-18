@@ -8,6 +8,7 @@ typedef enum {
   MEMU_STATE_GOOD_TRAP,
   MEMU_STATE_BAD_TRAP,
   MEMU_STATE_ABORT,
+  MEMU_STATE_QUIT,
 } MEMUState;
 
 typedef struct {

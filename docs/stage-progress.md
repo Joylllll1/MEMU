@@ -765,6 +765,20 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 - Stage 8 is complete both as a local scaffold (`make stage8-test`) and under
   the strict NEMU alignment rules (`make pa-vme-test` plus the full pa-*
   regression). PAL/仙剑 is the remaining optional PA3 app target.
+- SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
+  AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,
+  and Flappy Bird "any key" all work; closing the SDL window is a clean
+  `MEMU_STATE_QUIT` exit (exit code 0, no ABORT register dump); the NDL shim
+  centers small canvases and scales oversized ones to fit the 400x300 display
+  (bird's 287x400 canvas letterboxes at 215x300 — this was why bird-sdl showed
+  no graphics before); `NSLIDER_SLIDES=/path/to/images make nslider-sdl` shows
+  user slides via `tools/mkbin/convert_slides.py` (sips resize + libbmp-format
+  repack, patches nslider's slide count).
+- PA compatibility builds are cached per configuration in `~/.cache/memu-pa`
+  (`MEMU_PA_CACHE_DIR` overrides, `MEMU_PA_FRESH=1` forces clean); the cache
+  auto-invalidates when the run/patch tooling changes, and each run re-rsyncs
+  from PA_HOME and re-applies patches, so newlib is only rebuilt on the first
+  run of a configuration.
 - Stage 1 uses `a0 == 0` as good trap and keeps `a1 = 42` as the visible
   computation result.
 - `ebreak` records `pc` as the trap instruction address, not the following PC.

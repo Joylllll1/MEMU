@@ -35,22 +35,29 @@ static uint32_t inject_queue[INJECT_QUEUE_SIZE];
 static size_t inject_head = 0;
 static size_t inject_tail = 0;
 
+/* Full AM key list in NEMU's numbering order; codes start at 1. */
+#define AM_KEY_LIST(_) \
+  _(ESCAPE) _(F1) _(F2) _(F3) _(F4) _(F5) _(F6) _(F7) _(F8) _(F9) _(F10) _(F11) _(F12) \
+  _(GRAVE) _(1) _(2) _(3) _(4) _(5) _(6) _(7) _(8) _(9) _(0) _(MINUS) _(EQUALS) _(BACKSPACE) \
+  _(TAB) _(Q) _(W) _(E) _(R) _(T) _(Y) _(U) _(I) _(O) _(P) _(LEFTBRACKET) _(RIGHTBRACKET) _(BACKSLASH) \
+  _(CAPSLOCK) _(A) _(S) _(D) _(F) _(G) _(H) _(J) _(K) _(L) _(SEMICOLON) _(APOSTROPHE) _(RETURN) \
+  _(LSHIFT) _(Z) _(X) _(C) _(V) _(B) _(N) _(M) _(COMMA) _(PERIOD) _(SLASH) _(RSHIFT) \
+  _(LCTRL) _(APPLICATION) _(LALT) _(SPACE) _(RALT) _(RCTRL) \
+  _(UP) _(DOWN) _(LEFT) _(RIGHT) _(INSERT) _(DELETE) _(HOME) _(END) _(PAGEUP) _(PAGEDOWN)
+
 enum {
   AM_KEY_NONE = 0,
-  AM_KEY_ESCAPE = 1,
-  AM_KEY_Q = 29,
-  AM_KEY_W = 30,
-  AM_KEY_U = 35,
-  AM_KEY_I = 36,
-  AM_KEY_A = 43,
-  AM_KEY_S = 44,
-  AM_KEY_D = 45,
-  AM_KEY_J = 49,
-  AM_KEY_K = 50,
-  AM_KEY_UP = 73,
-  AM_KEY_DOWN = 74,
-  AM_KEY_LEFT = 75,
-  AM_KEY_RIGHT = 76,
+#define AM_KEY_ENUM(k) AM_KEY_##k,
+  AM_KEY_LIST(AM_KEY_ENUM)
+#undef AM_KEY_ENUM
+  AM_KEY_COUNT,
+};
+
+static const char *const am_key_names[AM_KEY_COUNT] = {
+  "NONE",
+#define AM_KEY_NAME(k) #k,
+  AM_KEY_LIST(AM_KEY_NAME)
+#undef AM_KEY_NAME
 };
 
 static void inject_push(uint32_t event) {
@@ -102,38 +109,54 @@ static uint32_t kbd_pop(void) {
 }
 
 static uint32_t sdl_key_to_am(SDL_Keycode key) {
-  switch (key) {
-    case SDLK_ESCAPE:
-      return AM_KEY_ESCAPE;
-    case SDLK_q:
-      return AM_KEY_Q;
-    case SDLK_w:
-      return AM_KEY_W;
-    case SDLK_a:
-      return AM_KEY_A;
-    case SDLK_s:
-      return AM_KEY_S;
-    case SDLK_d:
-      return AM_KEY_D;
-    case SDLK_u:
-      return AM_KEY_U;
-    case SDLK_i:
-      return AM_KEY_I;
-    case SDLK_j:
-      return AM_KEY_J;
-    case SDLK_k:
-      return AM_KEY_K;
-    case SDLK_UP:
-      return AM_KEY_UP;
-    case SDLK_DOWN:
-      return AM_KEY_DOWN;
-    case SDLK_LEFT:
-      return AM_KEY_LEFT;
-    case SDLK_RIGHT:
-      return AM_KEY_RIGHT;
-    default:
-      return AM_KEY_NONE;
+  static const struct {
+    SDL_Keycode sdl;
+    uint32_t am;
+  } table[] = {
+    {SDLK_ESCAPE, AM_KEY_ESCAPE},
+    {SDLK_F1, AM_KEY_F1}, {SDLK_F2, AM_KEY_F2}, {SDLK_F3, AM_KEY_F3},
+    {SDLK_F4, AM_KEY_F4}, {SDLK_F5, AM_KEY_F5}, {SDLK_F6, AM_KEY_F6},
+    {SDLK_F7, AM_KEY_F7}, {SDLK_F8, AM_KEY_F8}, {SDLK_F9, AM_KEY_F9},
+    {SDLK_F10, AM_KEY_F10}, {SDLK_F11, AM_KEY_F11}, {SDLK_F12, AM_KEY_F12},
+    {SDLK_BACKQUOTE, AM_KEY_GRAVE},
+    {SDLK_1, AM_KEY_1}, {SDLK_2, AM_KEY_2}, {SDLK_3, AM_KEY_3},
+    {SDLK_4, AM_KEY_4}, {SDLK_5, AM_KEY_5}, {SDLK_6, AM_KEY_6},
+    {SDLK_7, AM_KEY_7}, {SDLK_8, AM_KEY_8}, {SDLK_9, AM_KEY_9},
+    {SDLK_0, AM_KEY_0},
+    {SDLK_MINUS, AM_KEY_MINUS}, {SDLK_EQUALS, AM_KEY_EQUALS},
+    {SDLK_BACKSPACE, AM_KEY_BACKSPACE}, {SDLK_TAB, AM_KEY_TAB},
+    {SDLK_q, AM_KEY_Q}, {SDLK_w, AM_KEY_W}, {SDLK_e, AM_KEY_E},
+    {SDLK_r, AM_KEY_R}, {SDLK_t, AM_KEY_T}, {SDLK_y, AM_KEY_Y},
+    {SDLK_u, AM_KEY_U}, {SDLK_i, AM_KEY_I}, {SDLK_o, AM_KEY_O},
+    {SDLK_p, AM_KEY_P},
+    {SDLK_LEFTBRACKET, AM_KEY_LEFTBRACKET},
+    {SDLK_RIGHTBRACKET, AM_KEY_RIGHTBRACKET},
+    {SDLK_BACKSLASH, AM_KEY_BACKSLASH}, {SDLK_CAPSLOCK, AM_KEY_CAPSLOCK},
+    {SDLK_a, AM_KEY_A}, {SDLK_s, AM_KEY_S}, {SDLK_d, AM_KEY_D},
+    {SDLK_f, AM_KEY_F}, {SDLK_g, AM_KEY_G}, {SDLK_h, AM_KEY_H},
+    {SDLK_j, AM_KEY_J}, {SDLK_k, AM_KEY_K}, {SDLK_l, AM_KEY_L},
+    {SDLK_SEMICOLON, AM_KEY_SEMICOLON}, {SDLK_QUOTE, AM_KEY_APOSTROPHE},
+    {SDLK_RETURN, AM_KEY_RETURN}, {SDLK_LSHIFT, AM_KEY_LSHIFT},
+    {SDLK_z, AM_KEY_Z}, {SDLK_x, AM_KEY_X}, {SDLK_c, AM_KEY_C},
+    {SDLK_v, AM_KEY_V}, {SDLK_b, AM_KEY_B}, {SDLK_n, AM_KEY_N},
+    {SDLK_m, AM_KEY_M},
+    {SDLK_COMMA, AM_KEY_COMMA}, {SDLK_PERIOD, AM_KEY_PERIOD},
+    {SDLK_SLASH, AM_KEY_SLASH}, {SDLK_RSHIFT, AM_KEY_RSHIFT},
+    {SDLK_LCTRL, AM_KEY_LCTRL}, {SDLK_APPLICATION, AM_KEY_APPLICATION},
+    {SDLK_LALT, AM_KEY_LALT}, {SDLK_SPACE, AM_KEY_SPACE},
+    {SDLK_RALT, AM_KEY_RALT}, {SDLK_RCTRL, AM_KEY_RCTRL},
+    {SDLK_UP, AM_KEY_UP}, {SDLK_DOWN, AM_KEY_DOWN},
+    {SDLK_LEFT, AM_KEY_LEFT}, {SDLK_RIGHT, AM_KEY_RIGHT},
+    {SDLK_INSERT, AM_KEY_INSERT}, {SDLK_DELETE, AM_KEY_DELETE},
+    {SDLK_HOME, AM_KEY_HOME}, {SDLK_END, AM_KEY_END},
+    {SDLK_PAGEUP, AM_KEY_PAGEUP}, {SDLK_PAGEDOWN, AM_KEY_PAGEDOWN},
+  };
+  for (size_t i = 0; i < MEMU_ARRAY_LEN(table); i++) {
+    if (table[i].sdl == key) {
+      return table[i].am;
+    }
   }
+  return AM_KEY_NONE;
 }
 
 static void sdl_shutdown(void) {
@@ -167,7 +190,7 @@ static bool sdl_init_once(void) {
     fprintf(stderr, "MEMU SDL init failed: %s\n", SDL_GetError());
     return false;
   }
-  sdl_window = SDL_CreateWindow("MEMU Mario",
+  sdl_window = SDL_CreateWindow("MEMU",
                                 SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED,
                                 (int)MEMU_SCREEN_W * SDL_SCALE,
@@ -595,63 +618,17 @@ uint32_t device_read_key_event(void) {
 }
 
 const char *device_key_name(uint32_t event) {
-  switch (event & ~MEMU_KEYDOWN_MASK) {
-    case AM_KEY_ESCAPE:
-      return "ESCAPE";
-    case AM_KEY_Q:
-      return "Q";
-    case AM_KEY_W:
-      return "W";
-    case AM_KEY_U:
-      return "U";
-    case AM_KEY_I:
-      return "I";
-    case AM_KEY_A:
-      return "A";
-    case AM_KEY_S:
-      return "S";
-    case AM_KEY_D:
-      return "D";
-    case AM_KEY_J:
-      return "J";
-    case AM_KEY_K:
-      return "K";
-    case AM_KEY_UP:
-      return "UP";
-    case AM_KEY_DOWN:
-      return "DOWN";
-    case AM_KEY_LEFT:
-      return "LEFT";
-    case AM_KEY_RIGHT:
-      return "RIGHT";
-    default:
-      return NULL;
+  uint32_t code = event & ~MEMU_KEYDOWN_MASK;
+  if (code == AM_KEY_NONE || code >= AM_KEY_COUNT) {
+    return NULL;
   }
+  return am_key_names[code];
 }
 
 uint32_t device_key_code(const char *name) {
-  static const struct {
-    const char *name;
-    uint32_t code;
-  } table[] = {
-    {"ESCAPE", AM_KEY_ESCAPE},
-    {"Q", AM_KEY_Q},
-    {"W", AM_KEY_W},
-    {"U", AM_KEY_U},
-    {"I", AM_KEY_I},
-    {"A", AM_KEY_A},
-    {"S", AM_KEY_S},
-    {"D", AM_KEY_D},
-    {"J", AM_KEY_J},
-    {"K", AM_KEY_K},
-    {"UP", AM_KEY_UP},
-    {"DOWN", AM_KEY_DOWN},
-    {"LEFT", AM_KEY_LEFT},
-    {"RIGHT", AM_KEY_RIGHT},
-  };
-  for (size_t i = 0; i < MEMU_ARRAY_LEN(table); i++) {
-    if (strcmp(name, table[i].name) == 0) {
-      return table[i].code;
+  for (uint32_t code = 1; code < AM_KEY_COUNT; code++) {
+    if (strcmp(name, am_key_names[code]) == 0) {
+      return code;
     }
   }
   return AM_KEY_NONE;

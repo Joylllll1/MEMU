@@ -7,14 +7,25 @@ from pathlib import Path
 NDL_SOURCE = r'''#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 static int evtdev = -1;
 static int fbdev = -1;
-static int screen_w = 0;
-static int screen_h = 0;
+static int disp_w = 0;
+static int disp_h = 0;
+static int canvas_w = 0;
+static int canvas_h = 0;
+static int off_x = 0;
+static int off_y = 0;
+static int fit_w = 0;
+static int fit_h = 0;
+/* Shadow canvas + row buffer, used only when the canvas is larger than the
+ * display and must be scaled down to fit. */
+static uint32_t *shadow = NULL;
+static uint32_t *rowbuf = NULL;
 
 uint32_t NDL_GetTicks() {
   struct timeval tv;
@@ -30,32 +41,69 @@ int NDL_PollEvent(char *buf, int len) {
   return n;
 }
 
-void NDL_OpenCanvas(int *w, int *h) {
+static void read_dispinfo(void) {
   int dispinfo = open("/proc/dispinfo", O_RDONLY);
-  if (dispinfo >= 0 && (*w == 0 || *h == 0)) {
-    char info[64] = {};
-    int n = read(dispinfo, info, sizeof(info) - 1);
-    if (n > 0) {
-      int parsed_w = 0, parsed_h = 0;
-      if (sscanf(info, "WIDTH:%d\nHEIGHT:%d", &parsed_w, &parsed_h) == 2) {
-        if (*w == 0) *w = parsed_w;
-        if (*h == 0) *h = parsed_h;
-      }
-    }
-    close(dispinfo);
+  if (dispinfo < 0) return;
+  char info[64] = {};
+  int n = read(dispinfo, info, sizeof(info) - 1);
+  if (n > 0) sscanf(info, "WIDTH:%d\nHEIGHT:%d", &disp_w, &disp_h);
+  close(dispinfo);
+}
+
+void NDL_OpenCanvas(int *w, int *h) {
+  read_dispinfo();
+  if (*w == 0 || *h == 0) {
+    *w = disp_w;
+    *h = disp_h;
   }
-  screen_w = *w;
-  screen_h = *h;
+  canvas_w = *w;
+  canvas_h = *h;
+  free(shadow);
+  shadow = NULL;
+  free(rowbuf);
+  rowbuf = NULL;
+  if (canvas_w <= disp_w && canvas_h <= disp_h) {
+    fit_w = canvas_w;
+    fit_h = canvas_h;
+  } else {
+    fit_h = disp_h;
+    fit_w = (int)((long)canvas_w * disp_h / canvas_h);
+    if (fit_w > disp_w) {
+      fit_w = disp_w;
+      fit_h = (int)((long)canvas_h * disp_w / canvas_w);
+    }
+    shadow = calloc((size_t)canvas_w * (size_t)canvas_h, sizeof(uint32_t));
+    rowbuf = malloc((size_t)fit_w * sizeof(uint32_t));
+  }
+  off_x = (disp_w - fit_w) / 2;
+  off_y = (disp_h - fit_h) / 2;
   if (fbdev < 0) fbdev = open("/dev/fb", O_WRONLY);
 }
 
 void NDL_DrawRect(uint32_t *pixels, int x, int y, int w, int h) {
   if (fbdev < 0 || pixels == NULL || w <= 0 || h <= 0) return;
-  if (x < 0 || y < 0 || x + w > screen_w || y + h > screen_h) return;
-  for (int row = 0; row < h; row++) {
-    off_t offset = (off_t)((y + row) * screen_w + x) * (off_t)sizeof(uint32_t);
-    if (lseek(fbdev, offset, SEEK_SET) < 0) return;
-    if (write(fbdev, pixels + row * w, (size_t)w * sizeof(uint32_t)) < 0) return;
+  if (x < 0 || y < 0 || x + w > canvas_w || y + h > canvas_h) return;
+  if (shadow == NULL) {
+    for (int row = 0; row < h; row++) {
+      off_t offset = (off_t)((off_y + y + row) * disp_w + off_x + x) * (off_t)sizeof(uint32_t);
+      if (lseek(fbdev, offset, SEEK_SET) < 0) return;
+      if (write(fbdev, pixels + row * w, (size_t)w * sizeof(uint32_t)) < 0) return;
+    }
+  } else {
+    if (rowbuf == NULL) return;
+    for (int row = 0; row < h; row++) {
+      memcpy(shadow + (y + row) * canvas_w + x, pixels + row * w,
+             (size_t)w * sizeof(uint32_t));
+    }
+    for (int dy = 0; dy < fit_h; dy++) {
+      const uint32_t *src = shadow + ((long)dy * canvas_h / fit_h) * canvas_w;
+      for (int dx = 0; dx < fit_w; dx++) {
+        rowbuf[dx] = src[(long)dx * canvas_w / fit_w];
+      }
+      off_t offset = (off_t)((off_y + dy) * disp_w + off_x) * (off_t)sizeof(uint32_t);
+      if (lseek(fbdev, offset, SEEK_SET) < 0) return;
+      if (write(fbdev, rowbuf, (size_t)fit_w * sizeof(uint32_t)) < 0) return;
+    }
   }
   *(volatile uint32_t *)0xa0000104 = 1;
 }
@@ -87,6 +135,10 @@ void NDL_Quit() {
   if (fbdev >= 0) close(fbdev);
   evtdev = -1;
   fbdev = -1;
+  free(shadow);
+  shadow = NULL;
+  free(rowbuf);
+  rowbuf = NULL;
 }
 '''
 
