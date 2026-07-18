@@ -177,7 +177,6 @@ struct Context {
 static Context* (*user_handler)(Event, Context*) = NULL;
 
 void __am_get_cur_as(Context *c);
-void __am_switch(Context *c);
 
 Context* __am_irq_handle(Context *c) {
   __am_get_cur_as(c);
@@ -200,8 +199,6 @@ Context* __am_irq_handle(Context *c) {
     c = user_handler(ev, c);
     assert(c != NULL);
   }
-
-  __am_switch(c);
 
   return c;
 }
@@ -250,16 +247,101 @@ void iset(bool enable) {
         encoding="ascii",
     )
 
-    text = trap.read_text(encoding="ascii")
-    # Context ends with `void *pdir`; reserve its slot inside the trap frame so
-    # __am_get_cur_as does not overwrite the interrupted stack top.
-    if "#define CONTEXT_SIZE  ((NR_REGS + 3) * XLEN)" in text:
-        text = text.replace("#define CONTEXT_SIZE  ((NR_REGS + 3) * XLEN)",
-                            "#define CONTEXT_SIZE  ((NR_REGS + 4) * XLEN)")
-    if "call __am_irq_handle\n\n  LOAD" in text:
-        text = text.replace("call __am_irq_handle\n\n  LOAD",
-                            "call __am_irq_handle\n\n  mv sp, a0\n\n  LOAD")
-    trap.write_text(text, encoding="ascii")
+    trap.write_text(
+        r'''#define concat_temp(x, y) x ## y
+#define concat(x, y) concat_temp(x, y)
+#define MAP(c, f) c(f)
+
+#if __riscv_xlen == 32
+#define LOAD  lw
+#define STORE sw
+#define XLEN  4
+#else
+#define LOAD  ld
+#define STORE sd
+#define XLEN  8
+#endif
+
+#define REGS_LO16(f) \
+      f( 1)       f( 3) f( 4) f( 5) f( 6) f( 7) f( 8) f( 9) \
+f(10) f(11) f(12) f(13) f(14) f(15)
+#define REGS_LO16_NO_T0(f) \
+      f( 1)       f( 3) f( 4)       f( 6) f( 7) f( 8) f( 9) \
+f(10) f(11) f(12) f(13) f(14) f(15)
+#ifndef __riscv_e
+#define REGS_HI16(f) \
+                                    f(16) f(17) f(18) f(19) \
+f(20) f(21) f(22) f(23) f(24) f(25) f(26) f(27) f(28) f(29) \
+f(30) f(31)
+#define NR_REGS 32
+#else
+#define REGS_HI16(f)
+#define NR_REGS 16
+#endif
+
+#define REGS(f) REGS_LO16(f) REGS_HI16(f)
+#define REGS_NO_T0(f) REGS_LO16_NO_T0(f) REGS_HI16(f)
+
+#define PUSH(n) STORE concat(x, n), (n * XLEN)(sp);
+#define POP_FROM(n) LOAD concat(x, n), (n * XLEN)(t0);
+#define CONTEXT_SIZE  ((NR_REGS + 4) * XLEN)
+#define OFFSET_SP     ( 2 * XLEN)
+#define OFFSET_CAUSE  ((NR_REGS + 0) * XLEN)
+#define OFFSET_STATUS ((NR_REGS + 1) * XLEN)
+#define OFFSET_EPC    ((NR_REGS + 2) * XLEN)
+#define OFFSET_PDIR   ((NR_REGS + 3) * XLEN)
+#define SATP_MODE     (1 << (__riscv_xlen - 1))
+
+.align 3
+.globl __am_asm_trap
+__am_asm_trap:
+  addi sp, sp, -CONTEXT_SIZE
+  MAP(REGS, PUSH)
+
+  # x2 is not pushed because sp now points at the frame. Save the interrupted
+  # user stack pointer in the Context so a process switch can restore it.
+  addi t0, sp, CONTEXT_SIZE
+  STORE t0, OFFSET_SP(sp)
+
+  csrr t0, mcause
+  csrr t1, mstatus
+  csrr t2, mepc
+  STORE t0, OFFSET_CAUSE(sp)
+  STORE t1, OFFSET_STATUS(sp)
+  STORE t2, OFFSET_EPC(sp)
+
+  li a0, (1 << 17)
+  or t1, t1, a0
+  csrw mstatus, t1
+
+  mv a0, sp
+  call __am_irq_handle
+  mv t0, a0
+
+  # Switch address spaces only after the C handler has returned. The handler
+  # runs on the interrupted user stack, which is not safe to use after a
+  # different process page table is installed.
+  LOAD t1, OFFSET_PDIR(t0)
+  beqz t1, 1f
+  srli t1, t1, 12
+  li t2, SATP_MODE
+  or t1, t1, t2
+  csrw satp, t1
+  sfence.vma
+1:
+
+  LOAD t1, OFFSET_STATUS(t0)
+  LOAD t2, OFFSET_EPC(t0)
+  csrw mstatus, t1
+  csrw mepc, t2
+
+  MAP(REGS_NO_T0, POP_FROM)
+  LOAD sp, OFFSET_SP(t0)
+  LOAD t0, (5 * XLEN)(t0)
+  mret
+''',
+        encoding="ascii",
+    )
 
     mpe.write_text(
         r'''#include <am.h>

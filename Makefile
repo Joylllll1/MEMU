@@ -60,7 +60,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vme-test \
+  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vfork-test pa-vme-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -111,6 +111,7 @@ help:
 	@printf '%s\n' '  make pa-pal-test     Run PAL with the local game data directory'
 	@printf '%s\n' '  make pa-execve-test  Build and run execve program replacement test'
 	@printf '%s\n' '  make pa-execve-args-test  Verify execve preserves argv across replacement'
+	@printf '%s\n' '  make pa-vfork-test    Verify child execve returns control to the parent'
 	@printf '%s\n' '  make pa-vme-test     Build and run Navy hello under Nanos-lite Sv32 paging'
 	@printf '%s\n' '  make runner-test     Run tools/run-tests.sh'
 	@printf '%s\n' '  make cmake-build     Configure and build with CMake'
@@ -312,6 +313,11 @@ pa-execve-test: $(MEMU)
 pa-execve-args-test: $(MEMU)
 	PA_NANOS_FULL_LIBC=1 PA_NANOS_MAX_INSTR=5000000 \
 	PA_NANOS_APP_NAME=execve-args-test PA_NANOS_APP_DIR=tests/exec-test PA_NANOS_APP_PATH=/bin/exec-test \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-vfork-test: $(MEMU)
+	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_MAX_INSTR=10000000 \
+	PA_NANOS_APP_NAME=vfork-test PA_NANOS_APP_DIR=tests/vfork-test PA_NANOS_APP_PATH=/bin/vfork-test \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
 
 pa-vme-test: $(MEMU)

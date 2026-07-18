@@ -58,6 +58,8 @@ fingerprint="$({ cat "$0" \
       "${script_dir}/patch-pa-pal.py" \
       "${script_dir}/mkbin/gen_slides.py" \
       "${script_dir}/mkbin/convert_slides.py" \
+      "${script_dir}/mkbin/vfork-test.c" \
+      "${script_dir}/mkbin/vfork-child.c" \
       "${script_dir}/prepare-pal-data.py"; \
     echo "${pa_home}"; } | cksum)"
 if [ "${MEMU_PA_FRESH:-0}" = 1 ] ||
@@ -129,6 +131,23 @@ include $(NAVY_HOME)/Makefile
 MAKEEOF
 fi
 
+if [ "${app_name}" = "vfork-test" ]; then
+  mkdir -p "${navy_home}/tests/vfork-test"
+  cp "${script_dir}/mkbin/vfork-test.c" "${navy_home}/tests/vfork-test/"
+  cat > "${navy_home}/tests/vfork-test/Makefile" << 'MAKEEOF'
+NAME = vfork-test
+SRCS = vfork-test.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+  mkdir -p "${navy_home}/tests/vfork-child"
+  cp "${script_dir}/mkbin/vfork-child.c" "${navy_home}/tests/vfork-child/"
+  cat > "${navy_home}/tests/vfork-child/Makefile" << 'MAKEEOF'
+NAME = vfork-child
+SRCS = vfork-child.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
@@ -194,6 +213,8 @@ case "${app_dir}" in
       ramdisk_tests="dummy hello execve-test"
     elif [ "${app_name}" = "execve-args-test" ]; then
       ramdisk_tests="dummy exec-test"
+    elif [ "${app_name}" = "vfork-test" ]; then
+      ramdisk_tests="dummy vfork-child vfork-test"
     fi
     ;;
   *)
@@ -214,6 +235,9 @@ if [ "${app_name}" = "bird" ]; then
   cp -r "${navy_home}/apps/bird/repo/res/"* "${navy_home}/fsimg/share/games/bird/"
 else
   PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
+  if [ "${app_name}" = "vfork-test" ]; then
+    PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/tests/vfork-child" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
+  fi
 fi
 PATH="${shim_dir}:$PATH" make -s -C "${navy_home}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} \
   APPS="${ramdisk_apps}" TESTS="${ramdisk_tests}" ramdisk
@@ -324,6 +348,17 @@ case "${app_name}" in
     require_output "exec-test: argv\[1\] = 1"
     require_output "exec-test: argv\[1\] = 2"
     echo "execve argv propagation OK"
+    ;;
+  vfork-test)
+    require_output "vfork-test: parent-before"
+    require_output "vfork-test: child-running"
+    require_output "vfork-test: parent-after pid="
+    if grep -q "vfork-test: exec-failed" "${work_root}/run-nanos.log"; then
+      echo "FAIL vfork-test: child execve failed"
+      sed -n '1,120p' "${work_root}/run-nanos.log"
+      exit 1
+    fi
+    echo "vfork child exec and parent resume OK"
     ;;
   bird)
     if grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then

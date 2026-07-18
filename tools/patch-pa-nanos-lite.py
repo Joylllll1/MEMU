@@ -50,9 +50,125 @@ int main() {
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
 PCB *current = NULL;
+static enum {
+  PROC_UNUSED,
+  PROC_RUNNABLE,
+  PROC_RUNNING,
+  PROC_BLOCKED,
+  PROC_EXITED,
+} proc_state[MAX_NR_PROC];
+static PCB *wait_parent[MAX_NR_PROC];
+static int proc_pid[MAX_NR_PROC];
+static int next_pid = 1;
 
 void switch_boot_pcb() {
   current = &pcb_boot;
+}
+
+static int proc_index(PCB *p) {
+  for (int i = 0; i < MAX_NR_PROC; i++) {
+    if (&pcb[i] == p) return i;
+  }
+  return -1;
+}
+
+static Context *context_slot(PCB *p) {
+  uintptr_t end = (uintptr_t)p->stack + STACK_SIZE;
+  return (Context *)((end & ~(uintptr_t)0xf) - sizeof(Context));
+}
+
+void process_register(PCB *p) {
+  int index = proc_index(p);
+  if (index < 0) return;
+  proc_state[index] = PROC_RUNNING;
+  if (proc_pid[index] == 0) proc_pid[index] = next_pid++;
+  current = p;
+}
+
+bool process_is_managed(void) {
+  int index = proc_index(current);
+  return index >= 0 && proc_state[index] != PROC_UNUSED &&
+         proc_state[index] != PROC_EXITED;
+}
+
+static PCB *next_runnable(void) {
+  int current_index = proc_index(current);
+  for (int step = 1; step <= MAX_NR_PROC; step++) {
+    int index = (current_index + step) % MAX_NR_PROC;
+    if (proc_state[index] == PROC_RUNNABLE) return &pcb[index];
+  }
+  return NULL;
+}
+
+Context *process_schedule(Context *prev) {
+  if (!process_is_managed()) return prev;
+  int current_index = proc_index(current);
+  current->cp = context_slot(current);
+  *current->cp = *prev;
+  if (proc_state[current_index] == PROC_RUNNING) {
+    proc_state[current_index] = PROC_RUNNABLE;
+  }
+  PCB *next = next_runnable();
+  if (next == NULL) {
+    proc_state[current_index] = PROC_RUNNING;
+    return prev;
+  }
+  int next_index = proc_index(next);
+  current = next;
+  proc_state[next_index] = PROC_RUNNING;
+  return next->cp;
+}
+
+/* PA's current Nanos-lite syscall surface exposes one fork number and its
+ * vfork users immediately exec. Share the address space until execve, then
+ * return to the blocked parent when the child exits. */
+Context *process_fork(Context *parent_ctx) {
+  if (!process_is_managed()) return parent_ctx;
+  int parent_index = proc_index(current);
+  int child_index = -1;
+  for (int i = 0; i < MAX_NR_PROC; i++) {
+    if (proc_state[i] == PROC_UNUSED || proc_state[i] == PROC_EXITED) {
+      child_index = i;
+      break;
+    }
+  }
+  if (child_index < 0) {
+    parent_ctx->GPRx = (uintptr_t)-1;
+    return parent_ctx;
+  }
+
+  PCB *parent = current;
+  PCB *child = &pcb[child_index];
+  parent->cp = context_slot(parent);
+  *parent->cp = *parent_ctx;
+  proc_pid[child_index] = next_pid++;
+  child->cp = context_slot(child);
+  *child->cp = *parent_ctx;
+  parent->cp->GPRx = (uintptr_t)proc_pid[child_index];
+  child->cp->GPRx = 0;
+  proc_state[child_index] = PROC_RUNNABLE;
+  wait_parent[child_index] = parent;
+  proc_state[parent_index] = PROC_BLOCKED;
+  current = child;
+  proc_state[child_index] = PROC_RUNNING;
+  return child->cp;
+}
+
+Context *process_exit(Context *prev) {
+  if (!process_is_managed()) return NULL;
+  int index = proc_index(current);
+  proc_state[index] = PROC_EXITED;
+  PCB *parent = wait_parent[index];
+  int parent_index = proc_index(parent);
+  if (parent_index >= 0 && proc_state[parent_index] == PROC_BLOCKED) {
+    proc_state[parent_index] = PROC_RUNNABLE;
+  }
+  PCB *next = next_runnable();
+  if (next == NULL) return NULL;
+  current = next;
+  int next_index = proc_index(next);
+  proc_state[next_index] = PROC_RUNNING;
+  return next->cp;
 }
 
 void naive_uload(PCB *pcb, const char *filename);
@@ -60,11 +176,12 @@ void naive_uload(PCB *pcb, const char *filename);
 void init_proc() {
   switch_boot_pcb();
   Log("Initializing processes...");
+  process_register(&pcb[0]);
   naive_uload(&pcb[0], "/bin/hello");
 }
 
 Context* schedule(Context *prev) {
-  return prev;
+  return process_schedule(prev);
 }
 '''.replace("/bin/hello", app_path),
         encoding="ascii",
@@ -73,16 +190,19 @@ Context* schedule(Context *prev) {
     (nanos / "src/irq.c").write_text(
         r'''#include <common.h>
 
-void do_syscall(Context *c);
+Context *do_syscall(Context *c);
+Context *process_schedule(Context *prev);
 
 static Context* do_event(Event e, Context* c) {
   switch (e.event) {
     case EVENT_YIELD:
+      c = process_schedule(c);
       break;
     case EVENT_SYSCALL:
-      do_syscall(c);
+      c = do_syscall(c);
       break;
     case EVENT_IRQ_TIMER:
+      c = process_schedule(c);
       break;
     default:
       panic("Unhandled event ID = %d", e.event);
@@ -602,12 +722,15 @@ void naive_uload(PCB *pcb, const char *filename) {
   load_and_jump(pcb, filename);
 }
 
+bool process_is_managed(void);
+
 void naive_execve(const char *filename, const char **argv, const char **envp) {
   static PCB execve_pcb;
-  memset(&execve_pcb, 0, sizeof(execve_pcb));
+  PCB *target = process_is_managed() ? current : &execve_pcb;
+  if (target == &execve_pcb) memset(target, 0, sizeof(*target));
   capture_exec_args(filename, argv, envp);
   Log("execve: %s", filename);
-  load_and_jump(&execve_pcb, filename);
+  load_and_jump(target, filename);
 }
 ''',
             encoding="ascii",
@@ -747,6 +870,7 @@ static uintptr_t loader(PCB *pcb, const char *filename, uintptr_t *args_ptr) {
 static void load_and_jump(PCB *pcb, const char *filename) {
   uintptr_t args = 0;
   uintptr_t entry = loader(pcb, filename, &args);
+  current = pcb;
   Log("Jump to entry = %p", entry);
   asm volatile(
       "mv sp, %0\n\t"
@@ -764,12 +888,15 @@ void naive_uload(PCB *pcb, const char *filename) {
   load_and_jump(pcb, filename);
 }
 
+bool process_is_managed(void);
+
 void naive_execve(const char *filename, const char **argv, const char **envp) {
   static PCB execve_pcb;
-  memset(&execve_pcb, 0, sizeof(execve_pcb));
+  PCB *target = process_is_managed() ? current : &execve_pcb;
+  if (target == &execve_pcb) memset(target, 0, sizeof(*target));
   capture_exec_args(filename, argv, envp);
   Log("execve: %s -> entry", filename);
-  load_and_jump(&execve_pcb, filename);
+  load_and_jump(target, filename);
 }
 ''',
         encoding="ascii",
@@ -788,6 +915,10 @@ int fs_close(int fd);
 int mm_brk(uintptr_t brk);
 void naive_uload(PCB *pcb, const char *filename);
 void naive_execve(const char *filename, const char **argv, const char **envp);
+bool process_is_managed(void);
+Context *process_schedule(Context *prev);
+Context *process_fork(Context *parent_ctx);
+Context *process_exit(Context *prev);
 
 static PCB batch_pcb;
 static const char *batch_programs[] = {
@@ -804,7 +935,7 @@ static void exit_current(uintptr_t status) {
   halt(status);
 }
 
-void do_syscall(Context *c) {
+Context *do_syscall(Context *c) {
   uintptr_t a[4];
   a[0] = c->GPR1;
   a[1] = c->GPR2;
@@ -813,12 +944,17 @@ void do_syscall(Context *c) {
 
   switch (a[0]) {
     case SYS_exit:
+    {
+      Context *next = process_exit(c);
+      if (next != NULL) return next;
       exit_current(a[1]);
       break;
+    }
     case SYS_yield:
-      yield();
       c->GPRx = 0;
-      break;
+      return process_schedule(c);
+    case SYS_fork:
+      return process_fork(c);
     case SYS_open:
       c->GPRx = fs_open((const char *)a[1], a[2], a[3]);
       break;
@@ -856,6 +992,7 @@ void do_syscall(Context *c) {
     default:
       panic("Unhandled syscall ID = %d", a[0]);
   }
+  return c;
 }
 ''',
         encoding="ascii",
@@ -1099,11 +1236,11 @@ pid_t _getpid() {
 }
 
 pid_t _fork() {
-  return -1;
+  return _syscall_(SYS_fork, 0, 0, 0);
 }
 
 pid_t vfork() {
-  return -1;
+  return _syscall_(SYS_fork, 0, 0, 0);
 }
 
 int _link(const char *d, const char *n) {

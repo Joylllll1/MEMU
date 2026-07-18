@@ -59,11 +59,27 @@ changes.
 - PA4 final integration remains open: the GitBook's MENU/NWM-style foreground
   switching demo needs real process creation, file-descriptor duplication,
   and multiple concurrently runnable Navy processes; MEMU currently has the
-  CTE/context, timer, and Sv32 core gates but not that full desktop demo.
+  CTE/context, timer, and Sv32 core gates, plus a minimal vfork-style child
+  exec/exit path that returns to the blocked parent, but not that full desktop
+  demo.
 - PAL audio compatibility fix: the temporary Navy PAL build now explicitly
   initializes DOSBox OPL lookup tables instead of relying on guest C++ global
   constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
-  MMIO boundary.
+MMIO boundary.
+
+PA4 process-creation prework:
+
+```sh
+make pa-vfork-test
+```
+
+This real Nanos-lite/VME test creates a vfork-style child through the PA
+`SYS_fork` number, execve-loads a finite Navy child program, exits the child,
+restores the parent's saved `Context` including its user stack and address
+space, and verifies the parent continues with `parent-after pid=2`. This is
+intentionally narrower than POSIX `fork`: the parent remains blocked until the
+child execs and exits. `pipe`, `dup`, `dup2`, and `wait` remain the next
+integration work for MENU/NWM.
 
 ## Strict NEMU Alignment Rule
 
