@@ -14,6 +14,8 @@ NDL_SOURCE = r'''#include <fcntl.h>
 
 static int evtdev = -1;
 static int fbdev = -1;
+static int sbctl = -1;
+static int sb = -1;
 static int disp_w = 0;
 static int disp_h = 0;
 static int canvas_w = 0;
@@ -109,19 +111,30 @@ void NDL_DrawRect(uint32_t *pixels, int x, int y, int w, int h) {
 }
 
 void NDL_OpenAudio(int freq, int channels, int samples) {
-  (void)freq; (void)channels; (void)samples;
+  if (sbctl < 0) sbctl = open("/dev/sbctl", O_RDWR);
+  if (sb < 0) sb = open("/dev/sb", O_WRONLY);
+  if (sbctl < 0 || sb < 0) return;
+  uint32_t config[3] = {(uint32_t)freq, (uint32_t)channels, (uint32_t)samples};
+  (void)write(sbctl, config, sizeof(config));
 }
 
 void NDL_CloseAudio() {
+  if (sb >= 0) close(sb);
+  if (sbctl >= 0) close(sbctl);
+  sb = -1;
+  sbctl = -1;
 }
 
 int NDL_PlayAudio(void *buf, int len) {
-  (void)buf;
-  return len;
+  if (sb < 0 || buf == NULL || len <= 0) return 0;
+  return write(sb, buf, (size_t)len);
 }
 
 int NDL_QueryAudio() {
-  return 0;
+  if (sbctl < 0) return 0;
+  uint32_t available = 0;
+  if (read(sbctl, &available, sizeof(available)) != sizeof(available)) return 0;
+  return (int)available;
 }
 
 int NDL_Init(uint32_t flags) {
@@ -133,6 +146,7 @@ int NDL_Init(uint32_t flags) {
 void NDL_Quit() {
   if (evtdev >= 0) close(evtdev);
   if (fbdev >= 0) close(fbdev);
+  NDL_CloseAudio();
   evtdev = -1;
   fbdev = -1;
   free(shadow);
@@ -143,12 +157,89 @@ void NDL_Quit() {
 '''
 
 
+AUDIO_SOURCE = r'''#include <NDL.h>
+#include <SDL.h>
+#include <stdlib.h>
+#include <string.h>
+
+static SDL_AudioSpec audio_spec;
+static int audio_opened = 0;
+static int audio_paused = 1;
+
+int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained) {
+  if (desired == NULL || desired->callback == NULL) return -1;
+  audio_spec = *desired;
+  audio_spec.size = (uint32_t)audio_spec.samples * audio_spec.channels *
+                    (audio_spec.format == AUDIO_U8 ? 1u : 2u);
+  NDL_OpenAudio(audio_spec.freq, audio_spec.channels, audio_spec.samples);
+  audio_opened = 1;
+  audio_paused = 1;
+  if (obtained != NULL) *obtained = audio_spec;
+  return 0;
+}
+
+void SDL_CloseAudio() {
+  if (audio_opened) NDL_CloseAudio();
+  audio_opened = 0;
+  audio_paused = 1;
+}
+
+void SDL_PauseAudio(int pause_on) {
+  audio_paused = pause_on != 0;
+}
+
+void miniSDL_audio_pump(void) {
+  if (!audio_opened || audio_paused || audio_spec.callback == NULL) return;
+  uint32_t len = audio_spec.size;
+  if (len == 0 || NDL_QueryAudio() < (int)len) return;
+  uint8_t *buffer = malloc(len);
+  if (buffer == NULL) return;
+  audio_spec.callback(audio_spec.userdata, buffer, (int)len);
+  (void)NDL_PlayAudio(buffer, (int)len);
+  free(buffer);
+}
+
+void SDL_MixAudio(uint8_t *dst, uint8_t *src, uint32_t len, int volume) {
+  if (dst == NULL || src == NULL || volume <= 0) return;
+  if (volume >= SDL_MIX_MAXVOLUME) {
+    memcpy(dst, src, len);
+    return;
+  }
+  for (uint32_t i = 0; i + 1 < len; i += 2) {
+    int sample = (int)(int16_t)(src[i] | ((uint16_t)src[i + 1] << 8));
+    sample = sample * volume / SDL_MIX_MAXVOLUME;
+    dst[i] = (uint8_t)sample;
+    dst[i + 1] = (uint8_t)(sample >> 8);
+  }
+}
+
+SDL_AudioSpec *SDL_LoadWAV(const char *file, SDL_AudioSpec *spec,
+                           uint8_t **audio_buf, uint32_t *audio_len) {
+  (void)file; (void)spec; (void)audio_buf; (void)audio_len;
+  return NULL;
+}
+
+void SDL_FreeWAV(uint8_t *audio_buf) {
+  free(audio_buf);
+}
+
+void SDL_LockAudio() {
+}
+
+void SDL_UnlockAudio() {
+}
+'''
+
+
 EVENT_SOURCE = r'''#include <NDL.h>
 #include <SDL.h>
 #include <stdio.h>
 #include <string.h>
 
 #define KEY_CASE(k) if (strcmp(name, #k) == 0) return SDLK_##k
+
+static uint8_t key_state[256];
+extern void miniSDL_audio_pump(void);
 
 static uint8_t key_code(const char *name) {
   KEY_CASE(ESCAPE); KEY_CASE(F1); KEY_CASE(F2); KEY_CASE(F3); KEY_CASE(F4);
@@ -178,6 +269,7 @@ int SDL_PushEvent(SDL_Event *ev) {
 }
 
 int SDL_PollEvent(SDL_Event *ev) {
+  miniSDL_audio_pump();
   if (ev == NULL) return 0;
   char line[64];
   if (!NDL_PollEvent(line, sizeof(line))) return 0;
@@ -185,6 +277,9 @@ int SDL_PollEvent(SDL_Event *ev) {
   if (sscanf(line, "%7s %31s", state, name) != 2) return 0;
   ev->key.type = strcmp(state, "kd") == 0 ? SDL_KEYDOWN : SDL_KEYUP;
   ev->key.keysym.sym = key_code(name);
+  if (ev->key.keysym.sym != SDLK_NONE) {
+    key_state[ev->key.keysym.sym] = ev->key.type == SDL_KEYDOWN;
+  }
   return 1;
 }
 
@@ -201,9 +296,8 @@ int SDL_PeepEvents(SDL_Event *ev, int numevents, int action, uint32_t mask) {
 }
 
 uint8_t* SDL_GetKeyState(int *numkeys) {
-  static uint8_t keys[256];
   if (numkeys) *numkeys = 256;
-  return keys;
+  return key_state;
 }
 '''
 
@@ -259,14 +353,17 @@ VIDEO_REPLACEMENTS = {
 }''',
     '''void SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, uint32_t color) {
 }''': r'''void SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, uint32_t color) {
-  assert(dst && dst->format->BytesPerPixel == 4);
+  assert(dst);
   int x0 = dstrect ? dstrect->x : 0;
   int y0 = dstrect ? dstrect->y : 0;
   int w = dstrect ? dstrect->w : dst->w;
   int h = dstrect ? dstrect->h : dst->h;
   for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      if (x0 + x >= 0 && x0 + x < dst->w && y0 + y >= 0 && y0 + y < dst->h) {
+    if (x0 < 0 || y0 + y < 0 || x0 + w > dst->w || y0 + y >= dst->h) continue;
+    if (dst->format->BytesPerPixel == 1) {
+      memset(dst->pixels + (y0 + y) * dst->pitch + x0, (uint8_t)color, (size_t)w);
+    } else if (dst->format->BytesPerPixel == 4) {
+      for (int x = 0; x < w; x++) {
         ((uint32_t *)dst->pixels)[(y0 + y) * dst->w + x0 + x] = color;
       }
     }
@@ -274,10 +371,30 @@ VIDEO_REPLACEMENTS = {
 }''',
     '''void SDL_UpdateRect(SDL_Surface *s, int x, int y, int w, int h) {
 }''': r'''void SDL_UpdateRect(SDL_Surface *s, int x, int y, int w, int h) {
+  extern void miniSDL_audio_pump(void);
+  miniSDL_audio_pump();
   if (s == NULL || !(s->flags & SDL_HWSURFACE)) return;
   if (w == 0) w = s->w;
   if (h == 0) h = s->h;
-  NDL_DrawRect((uint32_t *)s->pixels + y * s->w + x, x, y, w, h);
+  if (x < 0 || y < 0 || x + w > s->w || y + h > s->h) return;
+  if (s->format->BytesPerPixel == 4) {
+    NDL_DrawRect((uint32_t *)s->pixels + y * s->w + x, x, y, w, h);
+    return;
+  }
+  if (s->format->BytesPerPixel != 1 || s->format->palette == NULL) return;
+
+  uint32_t *converted = malloc((size_t)w * (size_t)h * sizeof(*converted));
+  if (converted == NULL) return;
+  for (int row = 0; row < h; row++) {
+    const uint8_t *src = s->pixels + (y + row) * s->pitch + x;
+    for (int col = 0; col < w; col++) {
+      SDL_Color color = s->format->palette->colors[src[col]];
+      converted[row * w + col] = UINT32_C(0xff000000) |
+          ((uint32_t)color.r << 16) | ((uint32_t)color.g << 8) | color.b;
+    }
+  }
+  NDL_DrawRect(converted, x, y, w, h);
+  free(converted);
 }''',
 }
 
@@ -395,6 +512,7 @@ char *IMG_GetError() {
 def patch_tree(navy: Path) -> None:
     (navy / "libs/libndl/NDL.c").write_text(NDL_SOURCE, encoding="ascii")
     (navy / "libs/libminiSDL/src/event.c").write_text(EVENT_SOURCE, encoding="ascii")
+    (navy / "libs/libminiSDL/src/audio.c").write_text(AUDIO_SOURCE, encoding="ascii")
     (navy / "libs/libminiSDL/src/timer.c").write_text(TIMER_SOURCE, encoding="ascii")
 
     video_path = navy / "libs/libminiSDL/src/video.c"

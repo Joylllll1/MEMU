@@ -29,5 +29,9 @@ void device_inject_key_events_from_file(const char *path);
 bool device_in_range(uint32_t addr, uint32_t len);
 uint32_t device_read(uint32_t addr, int len);
 void device_write(uint32_t addr, int len, uint32_t data);
+uint32_t device_audio_query(void);
+void device_audio_configure(uint32_t freq, uint32_t channels, uint32_t samples);
+uint32_t device_audio_play(const uint8_t *data, uint32_t len);
+void device_audio_close(void);
 
 #endif

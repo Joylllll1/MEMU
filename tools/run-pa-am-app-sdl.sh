@@ -69,6 +69,9 @@ case "${app}" in
   typing-game)
     echo "Typing game controls: type the falling letters, ESC to exit."
     ;;
+  bad-apple)
+    echo "Bad Apple controls: close the SDL window to stop."
+    ;;
 esac
 echo "Close the SDL window to stop MEMU."
 status=0

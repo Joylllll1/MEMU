@@ -9,3 +9,4 @@ build/
 *.img
 !tests/images/*.img
 *.o
+.local/

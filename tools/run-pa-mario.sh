@@ -48,14 +48,21 @@ if grep -q '^define LIB_TEMPLATE =' "${am_home}/Makefile"; then
 fi
 
 python3 "${script_dir}/patch-pa-nemu-ioe.py" "${am_home}"
+python3 "${script_dir}/patch-pa-litenes-audio.py" "${litenes_home}"
 
 make -s -C "${litenes_home}" ARCH=riscv32-nemu CROSS_COMPILE="${cross}" AM_HOME="${am_home}"
 
 echo "MEMU Mario controls: W/A/S/D direction, U SELECT, I START, J A, K B."
-echo "MEMU Mario audio: this LiteNES build does not generate NES APU audio; MEMU audio is verified by am-tests/audio apps."
+echo "MEMU Mario audio: LiteNES APU bridge enabled (pulse/triangle/noise)."
 echo "Close the SDL window to stop MEMU."
 status=0
-"${memu}" --image "${litenes_home}/build/litenes-riscv32-nemu.bin" --batch --sdl --max-instr "${max_instr}" || status=$?
+if [ -n "${MARIO_KEY_EVENTS:-}" ]; then
+  "${memu}" --image "${litenes_home}/build/litenes-riscv32-nemu.bin" --batch --sdl \
+    --key-events "${MARIO_KEY_EVENTS}" --max-instr "${max_instr}" || status=$?
+else
+  "${memu}" --image "${litenes_home}/build/litenes-riscv32-nemu.bin" --batch --sdl \
+    --max-instr "${max_instr}" || status=$?
+fi
 if [ "${status}" -ne 0 ]; then
   echo "MEMU Mario stopped (exit ${status})."
 fi

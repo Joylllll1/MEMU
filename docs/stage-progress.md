@@ -18,8 +18,9 @@ changes.
   mp-os two-process preemption scaffold.
 - Core NEMU-aligned gates through Stage 8 pass: real PA4
   yield/context/vmem/timer tests pass and the recorded PA3 apps still work;
-  full Stage 7/PA3 acceptance remains open because PAL is blocked before its
-  first scene by missing legal game resources.
+  full Stage 7/PA3 acceptance remains open because PAL host display/audio
+  verification is unavailable in the current headless environment; its local
+  resource staging and bounded rendering path now pass.
 - Additional CTE/PA4 prework: real `yield-os` and `thread-os` pass with
   `make pa-cte-os-tests`; MEMU now has minimal machine timer interrupt
   injection for `mstatus.MIE` + `mtvec`.
@@ -32,9 +33,11 @@ changes.
   prints through sys_write, exercises yield/exit, and good-traps after the
   second program exits.
 - Interactive LiteNES/Mario path: `make mario` builds an SDL-enabled MEMU,
-  patches PA AM audio glue, builds the PA LiteNES artifact, opens a 400x300
-  window, and maps host keys to AM keyboard events. No Mario sound is expected
-  in this PA checkout because LiteNES does not generate NES APU samples.
+  patches PA AM audio glue, applies a temporary LiteNES APU bridge, builds the
+  PA LiteNES artifact, opens a 400x300 window, and maps host keys to AM
+  keyboard events. The bridge mixes pulse, triangle, noise, and `$4011` DAC
+  output through the shared MEMU AM audio device without modifying the PA
+  checkout.
 - Active strict gate: FCEUX bounded execution passes with public `nestest.nes`
   under `/Users/wjl/Projects/icspa2025/ICS-PA/fceux-am/nes/rom/`; the historical
   PA Box download URL currently returns a login page.
@@ -42,8 +45,8 @@ changes.
   direct-syscall hello-to-dummy smoke, official Navy libc/newlib hello smoke,
   NSlider multi-slide navigation with real generated slide assets and keyboard
   injection, standalone NDL draw/event/timer test, Flappy Bird miniSDL game
-  running under batch mode, and execve-style program replacement. PAL and
-  interactive SDL input for Navy apps remain future work.
+  running under batch mode, and execve-style program replacement. PAL's
+  interactive display/audio verification remains host-dependent.
 - The full libc smoke uses downloaded compiler-rt/newlib sources and excludes
   three riscv32-incompatible newlib sources in the temporary tree:
   `getpass.c`, `stat64r.c`, and `wcwidth.c`.
@@ -52,6 +55,10 @@ changes.
   scaffold demonstrates same-VA isolation with timer preemption, and the
   real PA4 path runs official Navy hello under Nanos-lite HAS_VME paging
   through `make pa-vme-test`.
+- PAL audio compatibility fix: the temporary Navy PAL build now explicitly
+  initializes DOSBox OPL lookup tables instead of relying on guest C++ global
+  constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
+  MMIO boundary.
 
 ## Strict NEMU Alignment Rule
 
@@ -85,11 +92,11 @@ AM hello/dummy/trap: pass for AM hello/halt trap
 AM timer/interrupt/keyboard/display/devscan/audio tests: pass for real am-tests h/t/i/k/v/d/a
 slider / typing-game / demo: pass for bounded real AM app runs
 bad-apple or snake: both pass in bounded real AM app runs
-LiteNES/Mario status: pass for bounded bundled Mario ROM render/FPS; SDL path added for interactive play with keyboard via `make mario`; no LiteNES/Mario audio output in this PA source
+LiteNES/Mario status: pass for bounded bundled Mario ROM render/FPS; SDL path added for interactive play with keyboard via `make mario`; temporary APU bridge produces non-zero PCM through the shared AM audio device
 FCEUX status: pass for bounded execution of public `nestest.nes`; the official
 PA Box URL currently returns a login page rather than the historical archive
 yield-os/thread-os status: pass for real am-kernels CTE/context-switch smoke
-Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL builds and its missing-resource probe passes, but visible scene/input remains blocked on legal game data
+Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL data staging, bounded rendering, and the Navy audio path compile/pass, while host SDL display/audio verification remains
 PA4 virtual memory status: pass; MEMU Sv32 translation drives the local mp-os two-process scaffold (`make stage8-test`) and official Navy hello under Nanos-lite HAS_VME paging (`make pa-vme-test`)
 ```
 
@@ -277,7 +284,9 @@ default non-SDL keyboard remains a polling stub; SDL Mario path has host keyboar
 FCEUX bounded execution passes with `nestest.nes` in this checkout's
 `fceux-am/nes/` ROM directory; this validates FCEUX integration but is not a
 claim that a commercial game ROM was redistributed
-SDL audio output is implemented in MEMU and verified by AM audio/bad-apple paths; current LiteNES/Mario does not feed it audio
+SDL audio output is implemented in MEMU and verified by AM audio, Bad Apple,
+and LiteNES/Mario APU paths; the LiteNES bridge is applied only to a temporary
+PA build tree
 ```
 
 ## PA3 Minimal Nanos-lite/Navy Smoke
@@ -321,7 +330,7 @@ NDL_Init/OpenCanvas/DrawRect/GetTicks/PollEvent/Quit
 Flappy Bird miniSDL game: pass through `make pa-bird-test`; PNG sprites load
 via stb_image IMG_Load and the game runs 50M instructions without crashing
 Nanos-lite execve-style program replacement: pass through `make pa-execve-test`
-PAL: blocked; `make pa-pal-probe` builds and classifies missing `fbp.mkf`, while `make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data` is ready for a licensed resource directory
+PAL: bounded rendering pass; `make pa-pal-test` uses `.local/pal-data`, normalizes case-sensitive resource names, stages writable `sdlpal.cfg` plus five save slots, syncs them back after interactive exit, reaches the instruction limit, and compiles the Navy `/dev/sbctl`/`/dev/sb` PCM path into MEMU's SDL audio queue. `make pal-sdl` remains for host display/audio verification.
 ```
 
 ## CTE OS Smoke
@@ -354,10 +363,10 @@ directory, patches the copied PA AM audio glue, builds
 START, J for A, and K for B. On this machine, the PA checkout defaults to
 `/Users/wjl/Projects/icspa2025/ICS-PA`; otherwise pass `PA_HOME=/path/to/ICS-PA`.
 
-Audio note: the MEMU audio device exists, but this LiteNES/Mario target has no
-sound in the current PA checkout. `am-kernels/kernels/litenes/src/psg.c`
-implements only controller reads/writes around `0x4016`; it does not call
-`AM_AUDIO_PLAY` or synthesize NES APU samples.
+Audio note: `make mario` applies `tools/patch-pa-litenes-audio.py` to the
+temporary PA tree. It keeps the original controller path and adds a small NES
+APU bridge for pulse, triangle, noise, and `$4011` DAC output, sending PCM via
+`AM_AUDIO_CONFIG`, `AM_AUDIO_CTRL`, and `AM_AUDIO_PLAY`.
 
 The non-window CI-style smoke for this path passed:
 

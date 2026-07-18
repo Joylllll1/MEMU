@@ -83,6 +83,8 @@ void fs_load_ramdisk(MEMUFS *fs, const char *path) {
               (uint32_t)strlen(FS_PROC_DISPINFO));
   add_special(fs, "/dev/events", MEMU_FILE_DEV_EVENTS, 0);
   add_special(fs, "/dev/fb", MEMU_FILE_DEV_FB, MEMU_FB_SIZE);
+  add_special(fs, "/dev/sbctl", MEMU_FILE_DEV_SBCTL, 12);
+  add_special(fs, "/dev/sb", MEMU_FILE_DEV_SB, UINT32_MAX);
 
   printf("MEMU: loaded ramdisk %s, files=%d, bytes=%zu\n",
          path, fs->file_count, fs->ramdisk.size);
@@ -176,6 +178,25 @@ uint32_t fs_read(MEMUFS *fs, uint32_t fd, uint32_t guest_buf, uint32_t len) {
     return guest_write_string(guest_buf, line, len);
   }
 
+  if (file->kind == MEMU_FILE_DEV_SBCTL) {
+    if (len < 4) {
+      return 0;
+    }
+    uint32_t available = device_audio_query();
+    uint8_t bytes[4] = {
+      (uint8_t)available,
+      (uint8_t)(available >> 8),
+      (uint8_t)(available >> 16),
+      (uint8_t)(available >> 24),
+    };
+    guest_write_bytes(guest_buf, bytes, sizeof(bytes));
+    return sizeof(bytes);
+  }
+
+  if (file->kind == MEMU_FILE_DEV_SB) {
+    return UINT32_MAX;
+  }
+
   if (open->open_offset >= file->size) {
     return 0;
   }
@@ -196,6 +217,8 @@ uint32_t fs_read(MEMUFS *fs, uint32_t fd, uint32_t guest_buf, uint32_t len) {
     case MEMU_FILE_DEV_EVENTS:
       return 0;
     case MEMU_FILE_DEV_FB:
+    case MEMU_FILE_DEV_SBCTL:
+    case MEMU_FILE_DEV_SB:
       return UINT32_MAX;
   }
 
@@ -210,6 +233,38 @@ uint32_t fs_write(MEMUFS *fs, uint32_t fd, uint32_t guest_buf, uint32_t len) {
   }
 
   MEMUFileInfo *file = &fs->files[open->file_index];
+  if (file->kind == MEMU_FILE_DEV_SBCTL) {
+    if (len < 12) {
+      return UINT32_MAX;
+    }
+    uint32_t config[3] = {0, 0, 0};
+    for (uint32_t i = 0; i < 12; i++) {
+      config[i / 4u] |= mem_read(guest_buf + i, 1) << ((i % 4u) * 8u);
+    }
+    device_audio_configure(config[0], config[1], config[2]);
+    return 12;
+  }
+
+  if (file->kind == MEMU_FILE_DEV_SB) {
+    uint8_t chunk[1024];
+    uint32_t done = 0;
+    while (done < len) {
+      uint32_t chunk_len = len - done;
+      if (chunk_len > sizeof(chunk)) {
+        chunk_len = sizeof(chunk);
+      }
+      for (uint32_t i = 0; i < chunk_len; i++) {
+        chunk[i] = (uint8_t)mem_read(guest_buf + done + i, 1);
+      }
+      uint32_t written = device_audio_play(chunk, chunk_len);
+      done += written;
+      if (written != chunk_len) {
+        break;
+      }
+    }
+    return done;
+  }
+
   if (file->kind == MEMU_FILE_DEV_FB) {
     uint32_t actual = len;
     if (open->open_offset >= MEMU_FB_SIZE) {

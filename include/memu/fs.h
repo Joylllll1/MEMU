@@ -13,6 +13,8 @@ typedef enum {
   MEMU_FILE_PROC_DISPINFO,
   MEMU_FILE_DEV_EVENTS,
   MEMU_FILE_DEV_FB,
+  MEMU_FILE_DEV_SBCTL,
+  MEMU_FILE_DEV_SB,
 } MEMUFileKind;
 
 typedef struct {

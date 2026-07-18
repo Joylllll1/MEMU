@@ -12,6 +12,7 @@ ndl="${PA_NANOS_NDL:-0}"
 vme="${PA_NANOS_VME:-0}"
 interactive="${PA_NANOS_INTERACTIVE:-0}"
 pal_data="${PAL_NANOS_DATA:-}"
+pal_stage_dir=""
 if [ "${interactive}" = 1 ]; then
   max_instr="${PA_NANOS_MAX_INSTR:-18446744073709551615}"
 fi
@@ -54,8 +55,10 @@ fingerprint="$({ cat "$0" \
       "${script_dir}/patch-pa-nemu-ioe.py" \
       "${script_dir}/patch-pa-nanos-lite.py" \
       "${script_dir}/patch-pa-navy-ndl.py" \
+      "${script_dir}/patch-pa-pal.py" \
       "${script_dir}/mkbin/gen_slides.py" \
-      "${script_dir}/mkbin/convert_slides.py"; \
+      "${script_dir}/mkbin/convert_slides.py" \
+      "${script_dir}/prepare-pal-data.py"; \
     echo "${pa_home}"; } | cksum)"
 if [ "${MEMU_PA_FRESH:-0}" = 1 ] ||
    [ ! -f "${stamp_file}" ] ||
@@ -101,6 +104,9 @@ fi
 if [ "${ndl}" = 1 ]; then
   python3 "${script_dir}/patch-pa-navy-ndl.py" "${navy_home}"
 fi
+if [ "${app_name}" = "pal" ]; then
+  python3 "${script_dir}/patch-pa-pal.py" "${navy_home}/${app_dir}/repo"
+fi
 
 if [ "${app_name}" = "ndl-test" ]; then
   mkdir -p "${navy_home}/tests/ndl-test"
@@ -141,7 +147,9 @@ case "${app_dir}" in
           echo "PAL_NANOS_DATA is not a directory: ${pal_data}" >&2
           exit 1
         fi
-        cp -R "${pal_data}/." "${navy_home}/${app_dir}/repo/data/"
+        python3 "${script_dir}/prepare-pal-data.py" \
+          "${pal_data}" "${navy_home}/${app_dir}/repo/data"
+        pal_stage_dir="${navy_home}/${app_dir}/repo/data"
         echo "MEMU: using PAL data from ${pal_data}"
       else
         echo "MEMU: PAL data not supplied; build probe will classify the missing-resource failure"
@@ -237,6 +245,12 @@ if [ "${interactive}" = 1 ]; then
   echo "Close the SDL window to stop MEMU."
   status=0
   "${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --sdl --max-instr "${max_instr}" || status=$?
+  if [ "${app_name}" = "pal" ] && [ -n "${pal_stage_dir}" ] && [ -n "${pal_data}" ]; then
+    if ! python3 "${script_dir}/prepare-pal-data.py" \
+      "${pal_data}" "${pal_stage_dir}" --sync; then
+      echo "MEMU: warning: could not persist PAL saves/config to ${pal_data}" >&2
+    fi
+  fi
   if [ "${status}" -ne 0 ]; then
     echo "MEMU ${app_name} stopped (exit ${status})."
     exit "${status}"

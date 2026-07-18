@@ -1,5 +1,6 @@
 #include "memu/device.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef MEMU_ENABLE_SDL
@@ -29,11 +30,22 @@ static uint8_t fb[MEMU_FB_SIZE];
 static uint8_t audio_sbuf[MEMU_AUDIO_SBUF_SIZE];
 static uint32_t audio_regs[6];
 
+static bool audio_debug_enabled(void) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    enabled = getenv("MEMU_AUDIO_DEBUG") != NULL ? 1 : 0;
+  }
+  return enabled != 0;
+}
+
 /* Input injection queue — usable in both SDL and non-SDL modes. */
 #define INJECT_QUEUE_SIZE 256
 static uint32_t inject_queue[INJECT_QUEUE_SIZE];
+static uint64_t inject_ready_us[INJECT_QUEUE_SIZE];
 static size_t inject_head = 0;
 static size_t inject_tail = 0;
+
+static uint64_t host_time_us(void);
 
 /* Full AM key list in NEMU's numbering order; codes start at 1. */
 #define AM_KEY_LIST(_) \
@@ -60,16 +72,20 @@ static const char *const am_key_names[AM_KEY_COUNT] = {
 #undef AM_KEY_NAME
 };
 
-static void inject_push(uint32_t event) {
+static void inject_push(uint32_t event, uint64_t ready_us) {
   size_t next = (inject_tail + 1u) % INJECT_QUEUE_SIZE;
   if (next != inject_head) {
     inject_queue[inject_tail] = event;
+    inject_ready_us[inject_tail] = ready_us;
     inject_tail = next;
   }
 }
 
 static uint32_t inject_pop(void) {
   if (inject_head == inject_tail) {
+    return AM_KEY_NONE;
+  }
+  if (inject_ready_us[inject_head] > host_time_us()) {
     return AM_KEY_NONE;
   }
   uint32_t event = inject_queue[inject_head];
@@ -85,6 +101,7 @@ static SDL_Window *sdl_window = NULL;
 static SDL_Renderer *sdl_renderer = NULL;
 static SDL_Texture *sdl_texture = NULL;
 static SDL_AudioDeviceID sdl_audio_device = 0;
+static bool sdl_audio_started = false;
 static bool sdl_ready = false;
 static bool sdl_quit = false;
 static uint32_t kbd_queue[KBD_QUEUE_SIZE];
@@ -164,6 +181,7 @@ static void sdl_shutdown(void) {
     SDL_CloseAudioDevice(sdl_audio_device);
     sdl_audio_device = 0;
   }
+  sdl_audio_started = false;
   if (sdl_texture != NULL) {
     SDL_DestroyTexture(sdl_texture);
     sdl_texture = NULL;
@@ -243,6 +261,20 @@ static uint32_t sdl_audio_queued(void) {
   return SDL_GetQueuedAudioSize(sdl_audio_device);
 }
 
+static void sdl_audio_maybe_start(void) {
+  if (sdl_audio_device == 0 || sdl_audio_started) {
+    return;
+  }
+  uint32_t samples = audio_regs[2] != 0 ? audio_regs[2] : 1024;
+  uint32_t channels = audio_regs[1] != 0 ? audio_regs[1] : 1;
+  uint64_t period = (uint64_t)samples * channels * sizeof(int16_t);
+  uint32_t prebuffer = (uint32_t)(period * 3u);
+  if (sdl_audio_queued() >= prebuffer) {
+    SDL_PauseAudioDevice(sdl_audio_device, 0);
+    sdl_audio_started = true;
+  }
+}
+
 static void sdl_audio_init_from_regs(void) {
   if (!sdl_requested || !sdl_init_once()) {
     return;
@@ -255,6 +287,7 @@ static void sdl_audio_init_from_regs(void) {
     SDL_CloseAudioDevice(sdl_audio_device);
     sdl_audio_device = 0;
   }
+  sdl_audio_started = false;
 
   SDL_AudioSpec want;
   SDL_zero(want);
@@ -270,6 +303,7 @@ static void sdl_audio_init_from_regs(void) {
     return;
   }
   SDL_PauseAudioDevice(sdl_audio_device, 0);
+  sdl_audio_started = true;
 }
 
 static void sdl_audio_queue_from_sbuf(uint32_t old_count, uint32_t new_count) {
@@ -284,8 +318,76 @@ static void sdl_audio_queue_from_sbuf(uint32_t old_count, uint32_t new_count) {
     len = MEMU_AUDIO_SBUF_SIZE - old_count;
   }
   SDL_QueueAudio(sdl_audio_device, audio_sbuf + old_count, len);
+  sdl_audio_maybe_start();
 }
 #endif
+
+uint32_t device_audio_query(void) {
+#ifdef MEMU_ENABLE_SDL
+  if (sdl_audio_device != 0) {
+    uint32_t queued = sdl_audio_queued();
+    return queued >= MEMU_AUDIO_SBUF_SIZE ? 0 : MEMU_AUDIO_SBUF_SIZE - queued;
+  }
+#endif
+  return MEMU_AUDIO_SBUF_SIZE;
+}
+
+void device_audio_configure(uint32_t freq, uint32_t channels, uint32_t samples) {
+  audio_regs[0] = freq;
+  audio_regs[1] = channels;
+  audio_regs[2] = samples;
+  audio_regs[4] = 1;
+  if (audio_debug_enabled()) {
+    fprintf(stderr, "MEMU AUDIO CONFIG freq=%u channels=%u samples=%u\n",
+            freq, channels, samples);
+  }
+#ifdef MEMU_ENABLE_SDL
+  sdl_audio_init_from_regs();
+#endif
+}
+
+uint32_t device_audio_play(const uint8_t *data, uint32_t len) {
+  uint32_t available = device_audio_query();
+  if (len > available) {
+    len = available;
+  }
+#ifdef MEMU_ENABLE_SDL
+  if (sdl_audio_device != 0 && len != 0) {
+    if (SDL_QueueAudio(sdl_audio_device, data, len) != 0) {
+      return 0;
+    }
+    sdl_audio_maybe_start();
+  }
+#else
+  (void)data;
+#endif
+  if (audio_debug_enabled()) {
+    static unsigned long calls = 0;
+    if (calls < 8) {
+      size_t nonzero = 0;
+      for (uint32_t i = 0; i < len; i++) {
+        if (data[i] != 0) {
+          nonzero++;
+        }
+      }
+      fprintf(stderr, "MEMU AUDIO PLAY len=%u nonzero=%zu first=%u\n",
+              len, nonzero, len != 0 ? data[0] : 0);
+    }
+    calls++;
+  }
+  return len;
+}
+
+void device_audio_close(void) {
+#ifdef MEMU_ENABLE_SDL
+  if (sdl_audio_device != 0) {
+    SDL_CloseAudioDevice(sdl_audio_device);
+    sdl_audio_device = 0;
+  }
+  sdl_audio_started = false;
+#endif
+  audio_regs[4] = 0;
+}
 
 #ifdef __APPLE__
 static uint64_t boot_tick = 0;
@@ -473,10 +575,22 @@ static void audio_write(uint32_t addr, int len, uint32_t data) {
     (void)old_count;
     audio_regs[off / 4u] = data;
     if (off == 0x10u && data != 0) {
+      if (audio_debug_enabled()) {
+        fprintf(stderr, "MEMU AUDIO MMIO CONFIG freq=%u channels=%u samples=%u\n",
+                audio_regs[0], audio_regs[1], audio_regs[2]);
+      }
 #ifdef MEMU_ENABLE_SDL
       sdl_audio_init_from_regs();
 #endif
     } else if (off == 0x14u) {
+      if (audio_debug_enabled()) {
+        size_t nonzero = 0;
+        for (uint32_t i = 0; i < data && i < MEMU_AUDIO_SBUF_SIZE; i++) {
+          if (audio_sbuf[i] != 0) nonzero++;
+        }
+        fprintf(stderr, "MEMU AUDIO MMIO PLAY count=%u nonzero=%zu first=%u\n",
+                data, nonzero, data != 0 ? audio_sbuf[0] : 0);
+      }
 #ifdef MEMU_ENABLE_SDL
       sdl_audio_queue_from_sbuf(old_count, data);
       audio_regs[5] = sdl_audio_queued();
@@ -638,8 +752,15 @@ void device_inject_key_events_from_file(const char *path) {
   FILE *f = fopen(path, "r");
   MEMU_ASSERT(f != NULL, "cannot open key events file: %s", path);
   char line[64];
+  uint64_t ready_us = host_time_us();
+  size_t injected = 0;
   while (fgets(line, sizeof(line), f) != NULL) {
     char state[8], name[32];
+    unsigned long long wait_ms;
+    if (sscanf(line, "wait %llu", &wait_ms) == 1) {
+      ready_us += (uint64_t)wait_ms * 1000u;
+      continue;
+    }
     if (sscanf(line, "%7s %31s", state, name) != 2) {
       continue;
     }
@@ -652,11 +773,11 @@ void device_inject_key_events_from_file(const char *path) {
     if (strcmp(state, "kd") == 0) {
       event |= MEMU_KEYDOWN_MASK;
     }
-    inject_push(event);
+    inject_push(event, ready_us);
+    injected++;
   }
   fclose(f);
-  printf("MEMU: injected %zu key events from %s\n",
-         (inject_tail - inject_head + INJECT_QUEUE_SIZE) % INJECT_QUEUE_SIZE, path);
+  printf("MEMU: injected %zu key events from %s\n", injected, path);
 }
 
 bool device_in_range(uint32_t addr, uint32_t len) {

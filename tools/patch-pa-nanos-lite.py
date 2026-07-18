@@ -204,6 +204,42 @@ size_t dispinfo_read(void *buf, size_t offset, size_t len) {
   return actual;
 }
 
+size_t audio_status_read(void *buf, size_t offset, size_t len) {
+  (void)offset;
+  AM_AUDIO_CONFIG_T config = io_read(AM_AUDIO_CONFIG);
+  AM_AUDIO_STATUS_T status = io_read(AM_AUDIO_STATUS);
+  int available = config.bufsize - status.count;
+  if (available < 0) available = 0;
+  uint32_t value = (uint32_t)available;
+  if (len < sizeof(value)) return 0;
+  memcpy(buf, &value, sizeof(value));
+  return sizeof(value);
+}
+
+size_t audio_control_write(const void *buf, size_t offset, size_t len) {
+  if (offset != 0 || len < 12) return 0;
+  const uint8_t *bytes = (const uint8_t *)buf;
+  AM_AUDIO_CTRL_T control = {
+    .freq = (int)(bytes[0] | ((uint32_t)bytes[1] << 8) |
+                  ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24)),
+    .channels = (int)(bytes[4] | ((uint32_t)bytes[5] << 8) |
+                      ((uint32_t)bytes[6] << 16) | ((uint32_t)bytes[7] << 24)),
+    .samples = (int)(bytes[8] | ((uint32_t)bytes[9] << 8) |
+                     ((uint32_t)bytes[10] << 16) | ((uint32_t)bytes[11] << 24)),
+  };
+  ioe_write(AM_AUDIO_CTRL, &control);
+  return 12;
+}
+
+size_t audio_play_write(const void *buf, size_t offset, size_t len) {
+  (void)offset;
+  AM_AUDIO_PLAY_T play = {
+    .buf = RANGE((void *)buf, (uint8_t *)buf + len),
+  };
+  ioe_write(AM_AUDIO_PLAY, &play);
+  return len;
+}
+
 size_t fb_write(const void *buf, size_t offset, size_t len) {
   AM_GPU_CONFIG_T cfg = io_read(AM_GPU_CONFIG);
   const uint32_t *pixels = (const uint32_t *)buf;
@@ -244,7 +280,7 @@ typedef struct {
   WriteFn write;
 } Finfo;
 
-enum {FD_STDIN, FD_STDOUT, FD_STDERR, FD_FB, FD_EVENTS, FD_DISPINFO};
+enum {FD_STDIN, FD_STDOUT, FD_STDERR, FD_FB, FD_EVENTS, FD_DISPINFO, FD_SBCTL, FD_SB};
 
 size_t ramdisk_read(void *buf, size_t offset, size_t len);
 size_t ramdisk_write(const void *buf, size_t offset, size_t len);
@@ -253,6 +289,9 @@ size_t serial_write(const void *buf, size_t offset, size_t len);
 size_t events_read(void *buf, size_t offset, size_t len);
 size_t dispinfo_read(void *buf, size_t offset, size_t len);
 size_t fb_write(const void *buf, size_t offset, size_t len);
+size_t audio_status_read(void *buf, size_t offset, size_t len);
+size_t audio_control_write(const void *buf, size_t offset, size_t len);
+size_t audio_play_write(const void *buf, size_t offset, size_t len);
 
 size_t invalid_read(void *buf, size_t offset, size_t len) {
   panic("should not reach here");
@@ -271,6 +310,8 @@ static Finfo file_table[] __attribute__((used)) = {
   [FD_FB]       = {"/dev/fb", 0, 0, invalid_read, fb_write},
   [FD_EVENTS]   = {"/dev/events", 0, 0, events_read, invalid_write},
   [FD_DISPINFO] = {"/proc/dispinfo", 0, 0, dispinfo_read, invalid_write},
+  [FD_SBCTL]    = {"/dev/sbctl", 4, 0, audio_status_read, audio_control_write},
+  [FD_SB]       = {"/dev/sb", 0, 0, invalid_read, audio_play_write},
 #include "files.h"
 };
 

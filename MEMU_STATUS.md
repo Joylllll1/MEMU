@@ -17,8 +17,11 @@ The local teaching emulator scaffold is implemented through Stage 8. The core
 strict NEMU gates through PA4 pass: real CPU, AM/IOE, AM apps, LiteNES/Mario and
 FCEUX bounded, CTE yield-os/thread-os, Nanos-lite batch, Navy libc hello,
 NSlider navigation, standalone NDL, bounded Flappy Bird, execve replacement,
-and Sv32 virtual memory. Full Stage 7/PA3 acceptance remains open because
-PAL/仙剑 is blocked before its first scene by missing legal game resources.
+and Sv32 virtual memory. PAL/仙剑 now builds with the supplied local data,
+has the interactive path, wires Navy `/dev/sbctl`/`/dev/sb` audio to MEMU's
+SDL queue, and stages writable PAL save/config files with host writeback;
+strict Stage 7 acceptance still needs a host run
+with a working display and audio device.
 
 ## Stage Status
 
@@ -31,7 +34,7 @@ PAL/仙剑 is blocked before its first scene by missing legal game resources.
 | Stage 4 | complete | runtime loop, raw/ELF loader, instruction limit, trap/error reporting |
 | Stage 5 | complete | serial, timer, keyboard, framebuffer, audio, SDL/Mario support; real AM IOE tests and AM apps pass |
 | Stage 6 | complete | ecall/syscalls, brk, batch-list, program handoff; real Nanos-lite batch users pass |
-| Stage 7 | complete with PAL gap | ramdisk, SFS/fixed file table, fd operations, real Navy apps and NSlider pass; PAL builds and its missing-resource path is classified, but no game data is available |
+| Stage 7 | complete with PAL host gap | ramdisk, SFS/fixed file table, fd operations, real Navy apps and NSlider pass; PAL data, keyboard state, audio, save slots, and config writeback are implemented, while host SDL verification remains |
 | Stage 8 | core gate pass | Sv32 virtual memory, mp-os multiprogramming scaffold, timer preemption; `make stage8-test` and `make pa-vme-test` pass |
 
 Important: “complete locally” means the MEMU scaffold and focused tests pass. It
@@ -66,13 +69,13 @@ Passed real artifact gates:
 - Sv32 virtual memory: the local mp-os two-process scaffold passes through
   `make stage8-test`, and official Navy hello runs under Nanos-lite HAS_VME
   paging in USER_SPACE 0x40000000 through `make pa-vme-test`.
-- PAL/仙剑 resource probe builds the real `pal-navy` app, packages it into
-  Nanos-lite, and classifies the missing `fbp.mkf` failure before the normal
-  `/bin/dummy` fallback through `make pa-pal-probe`.
+- PAL/仙剑 builds with the local `.local/pal-data` resource directory, stages
+  case-normalized files plus `sdlpal.cfg`, and reaches the 50M-instruction
+  rendering loop through `make pa-pal-test`.
 
 Not complete under strict acceptance:
 
-- PAL/仙剑, which needs the full miniSDL stack plus game assets.
+- PAL/仙剑 host SDL verification, which needs a manual `make pal-sdl` run on a host with a working display and audio device.
 
 The compatibility tables in `docs/compat-status.md` record per-program status
 and commands; `docs/nemu-strict-alignment.md` remains the completion rule.
@@ -116,7 +119,8 @@ make pa-navy-ndl-test PA_HOME=/path/to/ICS-PA
 make pa-ndl-test PA_HOME=/path/to/ICS-PA
 make pa-bird-test PA_HOME=/path/to/ICS-PA
 make pa-pal-probe PA_HOME=/path/to/ICS-PA
-make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data PA_HOME=/path/to/ICS-PA
+make pa-pal-test PA_HOME=/path/to/ICS-PA
+make pal-sdl PA_HOME=/path/to/ICS-PA
 make pa-execve-test PA_HOME=/path/to/ICS-PA
 make pa-vme-test PA_HOME=/path/to/ICS-PA
 ```
@@ -138,6 +142,7 @@ Other interactive SDL-window targets (close the window to stop; closing the
 window is a clean exit, not an error):
 
 ```sh
+make bad-apple-sdl # Bad Apple video and audio
 make snake-sdl     # AM snake, arrow keys + Q
 make typing-sdl    # AM typing-game, type falling letters
 make nslider-sdl   # NSlider slides, J/Down next, K/Up previous, digits+G goto
@@ -157,8 +162,10 @@ The PA compatibility builds are cached per configuration under
 the newlib rebuild and take seconds. The cache is invalidated automatically
 when the patch tooling changes; `MEMU_PA_FRESH=1` forces a clean rebuild.
 
-The current LiteNES source does not produce NES APU samples, so no Mario sound
-is expected even though MEMU's AM audio device exists and is tested separately.
+The SDL targets use one shared MEMU AM audio device. Bad Apple supplies decoded
+PCM through that device, and `make mario` applies a temporary LiteNES NES APU
+bridge for pulse, triangle, noise, and `$4011` DAC output. The PA checkout is
+never modified; the bridge is applied only to the temporary build.
 
 ## Current Compatibility Implementation
 
@@ -213,9 +220,9 @@ stage, compatibility status, commands, or blockers change.
 Stage 8 core acceptance passes. Full Stage 7/PA3 acceptance remains open.
 Remaining work:
 
-1. PAL/仙剑 bring-up with a legal game-data directory; the build and
-   missing-resource path are now verified, but visible scene/input are blocked
-   until `PAL_NANOS_DATA` is supplied.
+1. PAL/仙剑 host SDL verification: the local data directory, keyboard state,
+   audio path, save slots, and config writeback are implemented; `make pal-sdl`
+   needs to be run on a host with a working display and audio device.
 2. Optional performance work: a small software TLB in `src/memory/mmu.c` if
    long VME-enabled runs become slow (translation currently walks the page
    tables on every access).

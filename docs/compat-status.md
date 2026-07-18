@@ -21,10 +21,11 @@ Current strict summary:
 Local scaffold implemented through: Stage 8
 NEMU-aligned core gates: Stage 8 PA4 yield/context/vmem/timer pass and the
 real PA3 apps recorded below still work. Full Stage 7/PA3 acceptance remains
-open because PAL is blocked before its first scene by missing legal game
-resources.
-Active gate: provide `PAL_NANOS_DATA` and make PAL reach a visible interactive
-scene; deeper Sv32 app coverage is additional follow-up work.
+open because PAL host display/audio verification is unavailable in the current
+headless environment.
+Active gate: run `make pal-sdl` with the local `.local/pal-data` directory and
+confirm the opening scene responds to keyboard input and produces audio; deeper
+Sv32 app coverage is additional follow-up work.
 ```
 
 | Program | Layer | Status | Last Run | Notes |
@@ -56,7 +57,7 @@ scene; deeper Sv32 app coverage is additional follow-up work.
 | bad-apple | AM app | pass | 2026-07-15 | `make pa-app-tests`; ffmpeg generates video/audio resources, app builds and sustains execution to instruction limit |
 | snake | AM app | pass | 2026-07-15 | `make pa-app-tests`; bounded run renders, reaches GAME OVER, then waits for Q |
 | LiteNES / Mario | AM app | pass | 2026-07-15 | `make pa-app-tests`; boots bundled Mario ROM, renders frames, and prints FPS in bounded run |
-| LiteNES / Mario SDL | AM app | pass | 2026-07-15 | `make mario`; SDL framebuffer window and host keyboard mapping for local interactive play; no Mario sound is expected because this LiteNES source has no NES APU/AM_AUDIO output |
+| LiteNES / Mario SDL | AM app | pass | 2026-07-18 | `make mario`; SDL framebuffer window and host keyboard mapping for local interactive play; temporary LiteNES APU bridge sends pulse/triangle/noise and `$4011` DAC PCM through the shared MEMU AM audio device |
 | FCEUX | AM app | pass | 2026-07-15 | `make pa-fceux-test`; public `nestest.nes` is embedded, FCEUX starts, identifies mapper 0, renders framebuffer updates, and reaches the bounded instruction limit. The historical PA Box URL currently returns a login page. |
 | MEMU `/dev/events` | Navy/NDL prep | pass | 2026-07-15 | `make stage7-test`; `/dev/events` returns 0 when no SDL key is queued and SDL builds can format queued AM keys as `kd/ku KEY` lines |
 | Nanos-lite + Navy hello/dummy batch (direct syscall) | OS/Navy | pass | 2026-07-15 | `make pa-nanos-tests BUILD_DIR=/private/tmp/memu-pa-nanos-batch`; cloned real `nanos-lite` and `navy-apps`, patches only temp trees, boots Nanos-lite, loads Navy `tests/hello`, exits into `/bin/dummy`, prints `Dummy from Navy-apps`, and good-traps |
@@ -66,7 +67,7 @@ scene; deeper Sv32 app coverage is additional follow-up work.
 | NSlider | Navy/miniSDL | pass | 2026-07-17 | `make pa-navy-ndl-test`; official NSlider builds with real libc/libndl/libminiSDL/libbmp, renders real generated slides (gen_slides.py), keyboard navigation via --key-events injection verifies slide transitions with different framebuffer checksums |
 | Flappy Bird | Navy/miniSDL | pass | 2026-07-17 | `make pa-bird-test`; bird builds with libminiSDL/libSDL_image/libfixedptc, loads PNG sprites via stb_image IMG_Load, renders title screen, runs 50M instructions without crashing |
 | Nanos-lite execve | OS | pass | 2026-07-17 | `make pa-execve-test`; SYS_execve handler loads new ELF and replaces current program; execve-test calls execve("/bin/hello") and hello runs successfully |
-| PAL / 仙剑 | Navy/miniSDL | blocked | 2026-07-18 | `make pa-pal-probe` builds real `pal-navy`, packages it into Nanos-lite, and classifies missing `fbp.mkf`; visible scene/input requires `PAL_NANOS_DATA=/path/to/legal/game-data` |
+| PAL / 仙剑 | Navy/miniSDL | blocked | 2026-07-18 | `make pa-pal-test` with `.local/pal-data` stages 31 case-normalized resource files, writable `sdlpal.cfg` and five save slots, reaches the bounded rendering loop, and wires Navy `/dev/sbctl`/`/dev/sb` PCM to MEMU SDL audio. PAL's DOSBox OPL tables are now explicitly initialized for the Nanos-lite guest and the dummy-audio run receives non-zero PCM; manual `make pal-sdl` display/speaker verification still needs a host device |
 | yield-os | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `am-kernels/kernels/yield-os` alternates A/B under CTE context switching |
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
 | virtual memory smoke | PA4 | pass | 2026-07-17 | `make stage8-test` runs mp-os: two processes share user VA 0x40000000 mapped to different physical pages under real Sv32, timer preemption yields 16 alternating A/B timeslices, and vm-fault verifies the page-fault diagnostic |

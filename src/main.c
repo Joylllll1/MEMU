@@ -46,7 +46,7 @@ static void print_help(const char *argv0) {
   puts("  --trace-device      Print MMIO device reads and writes");
   puts("  --trace-syscall     Print syscall number, arguments, and return value");
   puts("  --sdl               Show framebuffer in an SDL window and enable keyboard");
-  puts("  --key-events PATH   Inject keyboard events from file for batch testing");
+  puts("  --key-events PATH   Inject keyboard events; lines may include wait MS");
   puts("  --max-instr N       Stop after N guest instructions");
 }
 
