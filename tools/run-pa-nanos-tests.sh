@@ -11,6 +11,7 @@ app_path="${PA_NANOS_APP_PATH:-/bin/hello}"
 ndl="${PA_NANOS_NDL:-0}"
 vme="${PA_NANOS_VME:-0}"
 interactive="${PA_NANOS_INTERACTIVE:-0}"
+pal_data="${PAL_NANOS_DATA:-}"
 if [ "${interactive}" = 1 ]; then
   max_instr="${PA_NANOS_MAX_INSTR:-18446744073709551615}"
 fi
@@ -128,7 +129,26 @@ key_events_file=""
 case "${app_dir}" in
   apps/*)
     ramdisk_apps="${app_dir#apps/}"
-    mkdir -p "${navy_home}/fsimg/share/slides"
+    if [ "${app_name}" = "pal" ]; then
+      mkdir -p "${navy_home}/fsimg/share/games"
+      mkdir -p "${navy_home}/${app_dir}/repo/data"
+      if [ -n "${pal_data}" ]; then
+        case "${pal_data}" in
+          "~") pal_data="${HOME}" ;;
+          "~/"*) pal_data="${HOME}${pal_data#\~}" ;;
+        esac
+        if [ ! -d "${pal_data}" ]; then
+          echo "PAL_NANOS_DATA is not a directory: ${pal_data}" >&2
+          exit 1
+        fi
+        cp -R "${pal_data}/." "${navy_home}/${app_dir}/repo/data/"
+        echo "MEMU: using PAL data from ${pal_data}"
+      else
+        echo "MEMU: PAL data not supplied; build probe will classify the missing-resource failure"
+      fi
+    else
+      mkdir -p "${navy_home}/fsimg/share/slides"
+    fi
     if [ "${app_name}" = "nslider" ] && [ -n "${NSLIDER_SLIDES:-}" ]; then
       # Expand a literal leading ~ (zsh does not expand it in make arguments).
       case "${NSLIDER_SLIDES}" in
@@ -144,12 +164,20 @@ case "${app_dir}" in
       echo "MEMU: using ${slide_count} slides from ${NSLIDER_SLIDES}"
       perl -pi -e "s/^const int N = \\d+;/const int N = ${slide_count};/" \
         "${navy_home}/${app_dir}/src/main.cpp"
-    else
+    elif [ "${app_name}" != "pal" ]; then
       rm -f "${navy_home}/fsimg/share/slides/"slides-*.bmp
       python3 "${script_dir}/mkbin/gen_slides.py" "${navy_home}/fsimg/share/slides" 10
     fi
     if [ "${app_name}" = "bird" ]; then
       awk '/^include.*NAVY_HOME/{print "CFLAGS += -D_GNU_SOURCE"}1' "${navy_home}/apps/bird/Makefile" > "${navy_home}/apps/bird/Makefile.tmp" && mv "${navy_home}/apps/bird/Makefile.tmp" "${navy_home}/apps/bird/Makefile"
+    fi
+    if [ "${app_name}" = "pal" ]; then
+      # pal-navy retains a desktop-only syslog include in unix.cpp; the file
+      # has no logging code in this port and Navy does not provide syslog.h.
+      perl -ni -e 'print unless /^#include <syslog\.h>\s*$/' \
+        "${navy_home}/${app_dir}/repo/src/misc/unix.cpp"
+      printf '%s\n' '#include <strings.h>' >> "${navy_home}/${app_dir}/repo/include/common.h"
+      perl -pi -e 's/ln -sf -T /ln -sf /' "${navy_home}/${app_dir}/Makefile"
     fi
     ;;
   tests/*)
@@ -285,6 +313,24 @@ case "${app_name}" in
       exit 1
     fi
     ;;
+  pal)
+    if [ -z "${pal_data}" ]; then
+      require_output "FATAL ERROR: File open error(0): fbp.mkf!"
+      require_output "HIT GOOD TRAP"
+      echo "PAL resource probe OK: missing fbp.mkf was classified and Nanos-lite fell back to dummy"
+    elif grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then
+      if grep -q "FATAL ERROR\|unknown syscall\|out-of-bounds\|illegal instruction" "${work_root}/run-nanos.log"; then
+        echo "FAIL pal: runtime reported an unexplained fatal error"
+        sed -n '1,160p' "${work_root}/run-nanos.log"
+        exit 1
+      fi
+      echo "PAL ran to the instruction limit with supplied resources"
+    else
+      echo "FAIL pal: did not reach the instruction limit"
+      sed -n '1,160p' "${work_root}/run-nanos.log"
+      exit 1
+    fi
+    ;;
   *)
     echo "no output checks defined for Navy app: ${app_name}" >&2
     exit 1
@@ -297,6 +343,8 @@ elif [ "${full_libc}" = 1 ] && [ "${app_name}" = hello ]; then
   echo "PASS nanos-lite-libc-hello"
 elif [ "${app_name}" = hello ]; then
   echo "PASS nanos-lite-hello-batch"
+elif [ "${app_name}" = pal ] && [ -z "${pal_data}" ]; then
+  echo "PASS nanos-lite-pal-resource-probe"
 else
   echo "PASS nanos-lite-${app_name}"
 fi

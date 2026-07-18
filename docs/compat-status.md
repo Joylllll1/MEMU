@@ -21,9 +21,10 @@ Current strict summary:
 Local scaffold implemented through: Stage 8
 NEMU-aligned core gates: Stage 8 PA4 yield/context/vmem/timer pass and the
 real PA3 apps recorded below still work. Full Stage 7/PA3 acceptance remains
-open because PAL is not-started.
-Active gate: PAL/仙剑 must reach a visible interactive scene; deeper Sv32 app
-coverage is additional follow-up work.
+open because PAL is blocked before its first scene by missing legal game
+resources.
+Active gate: provide `PAL_NANOS_DATA` and make PAL reach a visible interactive
+scene; deeper Sv32 app coverage is additional follow-up work.
 ```
 
 | Program | Layer | Status | Last Run | Notes |
@@ -65,7 +66,7 @@ coverage is additional follow-up work.
 | NSlider | Navy/miniSDL | pass | 2026-07-17 | `make pa-navy-ndl-test`; official NSlider builds with real libc/libndl/libminiSDL/libbmp, renders real generated slides (gen_slides.py), keyboard navigation via --key-events injection verifies slide transitions with different framebuffer checksums |
 | Flappy Bird | Navy/miniSDL | pass | 2026-07-17 | `make pa-bird-test`; bird builds with libminiSDL/libSDL_image/libfixedptc, loads PNG sprites via stb_image IMG_Load, renders title screen, runs 50M instructions without crashing |
 | Nanos-lite execve | OS | pass | 2026-07-17 | `make pa-execve-test`; SYS_execve handler loads new ELF and replaces current program; execve-test calls execve("/bin/hello") and hello runs successfully |
-| PAL / 仙剑 | Navy/miniSDL | not-started | - | Requires full Navy/NDL/miniSDL stack and game assets |
+| PAL / 仙剑 | Navy/miniSDL | blocked | 2026-07-18 | `make pa-pal-probe` builds real `pal-navy`, packages it into Nanos-lite, and classifies missing `fbp.mkf`; visible scene/input requires `PAL_NANOS_DATA=/path/to/legal/game-data` |
 | yield-os | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `am-kernels/kernels/yield-os` alternates A/B under CTE context switching |
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
 | virtual memory smoke | PA4 | pass | 2026-07-17 | `make stage8-test` runs mp-os: two processes share user VA 0x40000000 mapped to different physical pages under real Sv32, timer preemption yields 16 alternating A/B timeslices, and vm-fault verifies the page-fault diagnostic |

@@ -915,7 +915,9 @@ unsigned int sleep(unsigned int seconds) {
             "    program_break = 0x84000000;",
             "    extern char end;\n    program_break = (uintptr_t)&end;",
         )
-    if with_libc:
+    # Full libc already provides snprintf; defining the wrapper in libos too
+    # creates a duplicate symbol for applications such as PAL.
+    if not with_libc:
         syscall_text += snprintf_stub
     syscall_text += syscall_suffix
 

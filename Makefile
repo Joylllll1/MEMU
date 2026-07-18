@@ -59,7 +59,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-execve-test pa-vme-test \
+  mario memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-vme-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -104,6 +104,8 @@ help:
 	@printf '%s\n' '  make pa-navy-ndl-test Build and run real Navy NSlider through NDL/miniSDL'
 	@printf '%s\n' '  make pa-ndl-test     Build and run standalone NDL draw/event/timer test'
 	@printf '%s\n' '  make pa-bird-test    Build and run Flappy Bird miniSDL game'
+	@printf '%s\n' '  make pa-pal-probe    Build PAL and classify the missing-resource path'
+	@printf '%s\n' '  make pa-pal-test     Run PAL with PAL_NANOS_DATA=/path/to/game-data'
 	@printf '%s\n' '  make pa-execve-test  Build and run execve program replacement test'
 	@printf '%s\n' '  make pa-vme-test     Build and run Navy hello under Nanos-lite Sv32 paging'
 	@printf '%s\n' '  make runner-test     Run tools/run-tests.sh'
@@ -115,6 +117,7 @@ help:
 	@printf '%s\n' '  RUN_ARGS="..."       Extra memu arguments'
 	@printf '%s\n' '  BUILD_DIR=dir        Make build directory'
 	@printf '%s\n' '  NSLIDER_SLIDES=dir   Images to convert into NSlider slides (nslider-sdl)'
+	@printf '%s\n' '  PAL_NANOS_DATA=dir    Licensed PAL game data directory (pa-pal-test)'
 	@printf '%s\n' '  MEMU_PA_FRESH=1      Force a clean rebuild of the cached PA trees'
 	@printf '%s\n' '  MEMU_PA_CACHE_DIR=dir PA build cache location, default ~/.cache/memu-pa'
 
@@ -273,6 +276,18 @@ pa-ndl-test: $(MEMU)
 pa-bird-test: $(MEMU)
 	PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_MAX_INSTR=50000000 \
 	PA_NANOS_APP_NAME=bird PA_NANOS_APP_DIR=apps/bird PA_NANOS_APP_PATH=/bin/bird \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-pal-probe: $(MEMU)
+	PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_MAX_INSTR=5000000 \
+	PA_NANOS_APP_NAME=pal PA_NANOS_APP_DIR=apps/pal PA_NANOS_APP_PATH=/bin/pal \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-pal-test: $(MEMU)
+	@test -n "$(PAL_NANOS_DATA)" || { echo 'PAL_NANOS_DATA is required, for example: make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data'; exit 2; }
+	PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_MAX_INSTR=50000000 \
+	PA_NANOS_APP_NAME=pal PA_NANOS_APP_DIR=apps/pal PA_NANOS_APP_PATH=/bin/pal \
+	PAL_NANOS_DATA="$(PAL_NANOS_DATA)" \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
 
 pa-execve-test: $(MEMU)

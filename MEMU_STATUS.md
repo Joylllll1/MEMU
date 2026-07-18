@@ -1,6 +1,6 @@
 # MEMU Project Handoff Status
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 This file is the cross-device handoff for MEMU. Read it before changing code.
 The authoritative checkout is:
@@ -18,7 +18,7 @@ strict NEMU gates through PA4 pass: real CPU, AM/IOE, AM apps, LiteNES/Mario and
 FCEUX bounded, CTE yield-os/thread-os, Nanos-lite batch, Navy libc hello,
 NSlider navigation, standalone NDL, bounded Flappy Bird, execve replacement,
 and Sv32 virtual memory. Full Stage 7/PA3 acceptance remains open because
-PAL/仙剑 has not entered a visible interactive scene.
+PAL/仙剑 is blocked before its first scene by missing legal game resources.
 
 ## Stage Status
 
@@ -31,7 +31,7 @@ PAL/仙剑 has not entered a visible interactive scene.
 | Stage 4 | complete | runtime loop, raw/ELF loader, instruction limit, trap/error reporting |
 | Stage 5 | complete | serial, timer, keyboard, framebuffer, audio, SDL/Mario support; real AM IOE tests and AM apps pass |
 | Stage 6 | complete | ecall/syscalls, brk, batch-list, program handoff; real Nanos-lite batch users pass |
-| Stage 7 | complete with PAL gap | ramdisk, SFS/fixed file table, fd operations, real Navy apps and NSlider pass; PAL remains not-started |
+| Stage 7 | complete with PAL gap | ramdisk, SFS/fixed file table, fd operations, real Navy apps and NSlider pass; PAL builds and its missing-resource path is classified, but no game data is available |
 | Stage 8 | core gate pass | Sv32 virtual memory, mp-os multiprogramming scaffold, timer preemption; `make stage8-test` and `make pa-vme-test` pass |
 
 Important: “complete locally” means the MEMU scaffold and focused tests pass. It
@@ -66,6 +66,9 @@ Passed real artifact gates:
 - Sv32 virtual memory: the local mp-os two-process scaffold passes through
   `make stage8-test`, and official Navy hello runs under Nanos-lite HAS_VME
   paging in USER_SPACE 0x40000000 through `make pa-vme-test`.
+- PAL/仙剑 resource probe builds the real `pal-navy` app, packages it into
+  Nanos-lite, and classifies the missing `fbp.mkf` failure before the normal
+  `/bin/dummy` fallback through `make pa-pal-probe`.
 
 Not complete under strict acceptance:
 
@@ -112,6 +115,8 @@ make pa-nanos-libc-test PA_HOME=/path/to/ICS-PA
 make pa-navy-ndl-test PA_HOME=/path/to/ICS-PA
 make pa-ndl-test PA_HOME=/path/to/ICS-PA
 make pa-bird-test PA_HOME=/path/to/ICS-PA
+make pa-pal-probe PA_HOME=/path/to/ICS-PA
+make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data PA_HOME=/path/to/ICS-PA
 make pa-execve-test PA_HOME=/path/to/ICS-PA
 make pa-vme-test PA_HOME=/path/to/ICS-PA
 ```
@@ -208,7 +213,9 @@ stage, compatibility status, commands, or blockers change.
 Stage 8 core acceptance passes. Full Stage 7/PA3 acceptance remains open.
 Remaining work:
 
-1. PAL/仙剑 bring-up on the Navy/miniSDL stack, including game assets.
+1. PAL/仙剑 bring-up with a legal game-data directory; the build and
+   missing-resource path are now verified, but visible scene/input are blocked
+   until `PAL_NANOS_DATA` is supplied.
 2. Optional performance work: a small software TLB in `src/memory/mmu.c` if
    long VME-enabled runs become slow (translation currently walks the page
    tables on every access).

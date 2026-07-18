@@ -18,7 +18,8 @@ changes.
   mp-os two-process preemption scaffold.
 - Core NEMU-aligned gates through Stage 8 pass: real PA4
   yield/context/vmem/timer tests pass and the recorded PA3 apps still work;
-  full Stage 7/PA3 acceptance remains open because PAL is not-started.
+  full Stage 7/PA3 acceptance remains open because PAL is blocked before its
+  first scene by missing legal game resources.
 - Additional CTE/PA4 prework: real `yield-os` and `thread-os` pass with
   `make pa-cte-os-tests`; MEMU now has minimal machine timer interrupt
   injection for `mstatus.MIE` + `mtvec`.
@@ -88,7 +89,7 @@ LiteNES/Mario status: pass for bounded bundled Mario ROM render/FPS; SDL path ad
 FCEUX status: pass for bounded execution of public `nestest.nes`; the official
 PA Box URL currently returns a login page rather than the historical archive
 yield-os/thread-os status: pass for real am-kernels CTE/context-switch smoke
-Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL remains not-started
+Nanos-lite/Navy status: direct-syscall hello-to-dummy batch, official Navy libc/newlib hello, NSlider multi-slide navigation with real slides, standalone NDL draw/event/timer test, Flappy Bird miniSDL game, and execve program replacement pass under real Nanos-lite; PAL builds and its missing-resource probe passes, but visible scene/input remains blocked on legal game data
 PA4 virtual memory status: pass; MEMU Sv32 translation drives the local mp-os two-process scaffold (`make stage8-test`) and official Navy hello under Nanos-lite HAS_VME paging (`make pa-vme-test`)
 ```
 
@@ -320,7 +321,7 @@ NDL_Init/OpenCanvas/DrawRect/GetTicks/PollEvent/Quit
 Flappy Bird miniSDL game: pass through `make pa-bird-test`; PNG sprites load
 via stb_image IMG_Load and the game runs 50M instructions without crashing
 Nanos-lite execve-style program replacement: pass through `make pa-execve-test`
-PAL: not-started
+PAL: blocked; `make pa-pal-probe` builds and classifies missing `fbp.mkf`, while `make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data` is ready for a licensed resource directory
 ```
 
 ## CTE OS Smoke
@@ -502,7 +503,9 @@ ctest --test-dir /private/tmp/memu-stage7-cmake --output-on-failure
 Strict NEMU status: PA3 Navy/NDL/miniSDL coverage now includes real Navy libc
 hello, NSlider multi-slide navigation with generated slides and key injection,
 the standalone NDL test, Flappy Bird with PNG sprite loading, and execve
-program replacement. PAL remains unrun and is the outstanding PA3 gap.
+program replacement. PAL has now been built and run through its missing
+resource path; it remains the outstanding PA3 gap because no legal game data
+is available for visible-scene validation.
 
 The Stage 7 smoke artifacts are:
 
@@ -797,7 +800,8 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   package provides MEMU-local ramdisk, fd, special-file, and fs-loader fixtures.
   The local checkout now has `navy-apps`; the official libc/newlib hello,
   NSlider multi-slide navigation, standalone NDL test, and Flappy Bird paths
-  all pass through real NDL/miniSDL; PAL remains future work.
+  all pass through real NDL/miniSDL; PAL now has a real build/resource probe,
+  but visible scene/input remains blocked on legal game data.
 - `toolchain-basic.elf` is a real cross-compiled RV32 ELF smoke test, but it is
   not a substitute for AM `cpu-tests`, AM IOE tests, LiteNES, or Mario.
 - New sessions should verify the current tree before implementing the next

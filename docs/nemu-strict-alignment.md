@@ -27,18 +27,20 @@ Active strict gate: ...
 
 Current local scaffolds exist through Stage 8. The real CPU, AM/IOE, PA2 app,
 Nanos-lite/Navy, and core PA4 gates have run. The remaining strict Stage 7/PA3
-gap is PAL/仙剑, which has not yet entered a visible interactive scene.
+gap is PAL/仙剑, which has now been built and probed but is blocked before a
+visible scene because legal game resources are not present in the checkout.
 
 The active strict gate is:
 
 ```text
-Stage 7 gap: PAL/仙剑 visible scene and input
+Stage 7 gap: PAL/仙剑 visible scene and input after supplying legal game data
 -> Stage 8 regression: PA3 apps still work under the new VM path
 -> Optional depth: more real PA4 programs under Sv32
 ```
 
 Stage 6 and Stage 7 alignment is based on the real artifact rows in
-`docs/compat-status.md`; PAL remains the outstanding Stage 7 acceptance item.
+`docs/compat-status.md`; PAL remains the outstanding Stage 7 acceptance item,
+with its current blocker classified as missing `fbp.mkf` resource data.
 
 ## Stage Completion Rules
 

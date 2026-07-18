@@ -239,8 +239,10 @@ make pa-nanos-libc-test PA_HOME=/path/to/ICS-PA
 This builds the downloaded compiler-rt and Navy libc sources in the temp tree,
 links `printf` through libos syscalls, and runs until MEMU's instruction limit.
 The compatibility patch excludes three riscv32-incompatible newlib sources
-(`getpass.c`, `stat64r.c`, and `wcwidth.c`); NDL drawing apps, miniSDL apps,
-PAL, and `execve`-style program replacement remain future work.
+(`getpass.c`, `stat64r.c`, and `wcwidth.c`). NDL drawing apps, miniSDL apps,
+PAL, and `execve`-style program replacement have separate compatibility
+targets; use `make pa-pal-probe` for the PAL missing-resource probe and
+`make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data` for licensed data.
 
 To run Mario yourself in a window:
 
