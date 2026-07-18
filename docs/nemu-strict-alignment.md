@@ -25,22 +25,20 @@ Active strict gate: ...
 
 ## Current Strict Position
 
-Current local scaffolds exist through Stage 7, but strict NEMU alignment has not
-passed PA2 yet. The project must return to the PA2 acceptance chain before
-claiming Stage 5 completion.
+Current local scaffolds exist through Stage 8. The real CPU, AM/IOE, PA2 app,
+Nanos-lite/Navy, and core PA4 gates have run. The remaining strict Stage 7/PA3
+gap is PAL/仙剑, which has not yet entered a visible interactive scene.
 
 The active strict gate is:
 
 ```text
-Stage 3 cpu-tests
--> Stage 4 AM hello/dummy/trap
--> Stage 5 AM IOE tests
--> Stage 5 apps: slider, typing-game, demo, bad-apple/snake
--> Stage 5 challenge: LiteNES/Mario
+Stage 7 gap: PAL/仙剑 visible scene and input
+-> Stage 8 regression: PA3 apps still work under the new VM path
+-> Optional depth: more real PA4 programs under Sv32
 ```
 
-Stage 6 and Stage 7 local scaffolds are useful, but they do not prove PA3
-alignment until real Nanos-lite and Navy-apps artifacts run.
+Stage 6 and Stage 7 alignment is based on the real artifact rows in
+`docs/compat-status.md`; PAL remains the outstanding Stage 7 acceptance item.
 
 ## Stage Completion Rules
 
@@ -50,7 +48,7 @@ alignment until real Nanos-lite and Navy-apps artifacts run.
 | Stage 4 | Real AM hello/dummy/trap artifacts pass |
 | Stage 5 | Real AM IOE tests and representative AM apps pass |
 | Stage 6 | Real Nanos-lite minimal syscall/batch users pass |
-| Stage 7 | Real Navy text/draw apps and NSlider-class app pass |
+| Stage 7 | Real Navy text/draw apps, NSlider/Flappy Bird, and PAL reaches a visible scene |
 | Stage 8 | Real PA4 yield/context/vmem/timer tests pass while PA3 apps still work |
 
 ## PA2 Must-Have Targets

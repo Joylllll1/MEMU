@@ -13,13 +13,12 @@ Do not use `/Users/wjl/Documents/MEMU`; that is an older copy.
 
 ## One-line Status
 
-The local teaching emulator scaffold is implemented through Stage 8, and the
-strict NEMU alignment gates are complete through Stage 8: real CPU, AM/IOE,
-AM app, LiteNES/Mario and FCEUX bounded, CTE yield-os/thread-os, Nanos-lite
-batch, full Navy libc hello, NSlider multi-slide navigation, standalone NDL,
-Flappy Bird, execve program replacement, and Sv32 virtual memory (local mp-os
-plus Navy hello under Nanos-lite HAS_VME paging) all pass. PAL/仙剑 remains
-the outstanding optional PA3 app.
+The local teaching emulator scaffold is implemented through Stage 8. The core
+strict NEMU gates through PA4 pass: real CPU, AM/IOE, AM apps, LiteNES/Mario and
+FCEUX bounded, CTE yield-os/thread-os, Nanos-lite batch, Navy libc hello,
+NSlider navigation, standalone NDL, bounded Flappy Bird, execve replacement,
+and Sv32 virtual memory. Full Stage 7/PA3 acceptance remains open because
+PAL/仙剑 has not entered a visible interactive scene.
 
 ## Stage Status
 
@@ -32,8 +31,8 @@ the outstanding optional PA3 app.
 | Stage 4 | complete | runtime loop, raw/ELF loader, instruction limit, trap/error reporting |
 | Stage 5 | complete | serial, timer, keyboard, framebuffer, audio, SDL/Mario support; real AM IOE tests and AM apps pass |
 | Stage 6 | complete | ecall/syscalls, brk, batch-list, program handoff; real Nanos-lite batch users pass |
-| Stage 7 | complete | ramdisk, SFS/fixed file table, fd operations, user fs loader; real Navy apps and NSlider pass |
-| Stage 8 | complete | Sv32 virtual memory, mp-os multiprogramming scaffold, timer preemption; strict PA4 gate passes via `make pa-vme-test` |
+| Stage 7 | complete with PAL gap | ramdisk, SFS/fixed file table, fd operations, real Navy apps and NSlider pass; PAL remains not-started |
+| Stage 8 | core gate pass | Sv32 virtual memory, mp-os multiprogramming scaffold, timer preemption; `make stage8-test` and `make pa-vme-test` pass |
 
 Important: “complete locally” means the MEMU scaffold and focused tests pass. It
 does not automatically mean the corresponding NEMU PA stage is complete.
@@ -206,7 +205,8 @@ stage, compatibility status, commands, or blockers change.
 
 ## Next Recommended Work
 
-Stage 8 is complete under the strict rules. Remaining and optional work:
+Stage 8 core acceptance passes. Full Stage 7/PA3 acceptance remains open.
+Remaining work:
 
 1. PAL/仙剑 bring-up on the Navy/miniSDL stack, including game assets.
 2. Optional performance work: a small software TLB in `src/memory/mmu.c` if

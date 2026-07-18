@@ -19,8 +19,11 @@ Current strict summary:
 
 ```text
 Local scaffold implemented through: Stage 8
-NEMU-aligned complete through: Stage 8 per docs/nemu-strict-alignment.md stage rules (PA4 yield/context/vmem/timer pass and PA3 apps still work)
-Active gate: PAL remains not-started as the outstanding optional PA3 app; everything else in the strict order has recorded results.
+NEMU-aligned core gates: Stage 8 PA4 yield/context/vmem/timer pass and the
+real PA3 apps recorded below still work. Full Stage 7/PA3 acceptance remains
+open because PAL is not-started.
+Active gate: PAL/仙剑 must reach a visible interactive scene; deeper Sv32 app
+coverage is additional follow-up work.
 ```
 
 | Program | Layer | Status | Last Run | Notes |

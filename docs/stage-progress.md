@@ -16,9 +16,9 @@ changes.
 
 - Local scaffold implemented through: Stage 8, Sv32 virtual memory and the
   mp-os two-process preemption scaffold.
-- NEMU-aligned complete through: Stage 8 per the
-  `docs/nemu-strict-alignment.md` stage completion rules; real PA4
-  yield/context/vmem/timer tests pass while the PA3 apps still work.
+- Core NEMU-aligned gates through Stage 8 pass: real PA4
+  yield/context/vmem/timer tests pass and the recorded PA3 apps still work;
+  full Stage 7/PA3 acceptance remains open because PAL is not-started.
 - Additional CTE/PA4 prework: real `yield-os` and `thread-os` pass with
   `make pa-cte-os-tests`; MEMU now has minimal machine timer interrupt
   injection for `mstatus.MIE` + `mtvec`.
@@ -46,7 +46,7 @@ changes.
 - The full libc smoke uses downloaded compiler-rt/newlib sources and excludes
   three riscv32-incompatible newlib sources in the temporary tree:
   `getpass.c`, `stat64r.c`, and `wcwidth.c`.
-- Stage 8 virtual memory is complete: MEMU implements real Sv32 translation
+- Stage 8 virtual memory core gate passes: MEMU implements Sv32 translation
   (satp CSR, two-level walk, page-fault diagnostics), the local mp-os
   scaffold demonstrates same-VA isolation with timer preemption, and the
   real PA4 path runs official Navy hello under Nanos-lite HAS_VME paging
@@ -762,9 +762,9 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 
 ## Notes For Next Session
 
-- Stage 8 is complete both as a local scaffold (`make stage8-test`) and under
-  the strict NEMU alignment rules (`make pa-vme-test` plus the full pa-*
-  regression). PAL/仙剑 is the remaining optional PA3 app target.
+- Stage 8 core acceptance passes both locally (`make stage8-test`) and through
+  the real Navy hello paging path (`make pa-vme-test`). Full Stage 7/PA3
+  acceptance is still open until PAL/仙剑 reaches a visible scene.
 - SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
   AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,
   and Flappy Bird "any key" all work; closing the SDL window is a clean

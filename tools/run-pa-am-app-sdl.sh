@@ -75,5 +75,6 @@ status=0
 "${memu}" --image "${kernel_home}/build/${app}-riscv32-nemu.bin" --batch --sdl --max-instr "${max_instr}" || status=$?
 if [ "${status}" -ne 0 ]; then
   echo "MEMU ${app} stopped (exit ${status})."
+  exit "${status}"
 fi
 exit 0

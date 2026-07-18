@@ -211,6 +211,7 @@ if [ "${interactive}" = 1 ]; then
   "${memu}" --image "${nanos_home}/build/nanos-lite-riscv32-nemu.bin" --batch --sdl --max-instr "${max_instr}" || status=$?
   if [ "${status}" -ne 0 ]; then
     echo "MEMU ${app_name} stopped (exit ${status})."
+    exit "${status}"
   fi
   exit 0
 fi
