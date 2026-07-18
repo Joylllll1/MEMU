@@ -420,6 +420,7 @@ int fs_close(int fd) {
 #include <memory.h>
 #include <elf.h>
 #include <fs.h>
+#include <string.h>
 
 #ifdef __LP64__
 # define Elf_Ehdr Elf64_Ehdr
@@ -436,8 +437,91 @@ int fs_close(int fd);
 
 #define USTACK_PAGES 8
 #define USER_STACK_TOP 0x80000000u
+#define EXEC_MAX_ARGS 16
+#define EXEC_STRING_MAX 128
 
-static uintptr_t loader(PCB *pcb, const char *filename) {
+typedef struct {
+  int argc;
+  int envc;
+  char args[EXEC_MAX_ARGS][EXEC_STRING_MAX];
+  char envs[EXEC_MAX_ARGS][EXEC_STRING_MAX];
+} ExecArgs;
+
+static ExecArgs exec_args;
+static uintptr_t exec_argv_guest;
+static uintptr_t exec_envp_guest;
+
+static void copy_string(char *dst, const char *src) {
+  int i = 0;
+  if (src != NULL) {
+    for (; i < EXEC_STRING_MAX - 1 && src[i] != '\0'; i++) {
+      dst[i] = src[i];
+    }
+  }
+  dst[i] = '\0';
+}
+
+static int copy_vector(uintptr_t vector, char dst[][EXEC_STRING_MAX]) {
+  int count = 0;
+  if (vector == 0) return 0;
+  while (count < EXEC_MAX_ARGS) {
+    const char *src = ((const char **)vector)[count];
+    if (src == NULL) break;
+    copy_string(dst[count], src);
+    count++;
+  }
+  return count;
+}
+
+static void capture_exec_args(const char *filename, const char **argv,
+                              const char **envp) {
+  memset(&exec_args, 0, sizeof(exec_args));
+  exec_args.argc = copy_vector((uintptr_t)argv, exec_args.args);
+  if (exec_args.argc == 0) {
+    copy_string(exec_args.args[0], filename);
+    exec_args.argc = 1;
+  }
+  exec_args.envc = copy_vector((uintptr_t)envp, exec_args.envs);
+}
+
+static uintptr_t build_stack(uint8_t *stack_pa) {
+  const uintptr_t stack_base = USER_STACK_TOP - USTACK_PAGES * PGSIZE;
+  uintptr_t argv_guest[EXEC_MAX_ARGS];
+  uintptr_t envp_guest[EXEC_MAX_ARGS];
+  uintptr_t sp = USER_STACK_TOP;
+
+  for (int i = exec_args.argc - 1; i >= 0; i--) {
+    size_t len = strlen(exec_args.args[i]) + 1;
+    sp = (sp - (uintptr_t)len) & ~(uintptr_t)3;
+    memcpy(stack_pa + sp - stack_base, exec_args.args[i], len);
+    argv_guest[i] = sp;
+  }
+  for (int i = exec_args.envc - 1; i >= 0; i--) {
+    size_t len = strlen(exec_args.envs[i]) + 1;
+    sp = (sp - (uintptr_t)len) & ~(uintptr_t)3;
+    memcpy(stack_pa + sp - stack_base, exec_args.envs[i], len);
+    envp_guest[i] = sp;
+  }
+
+  sp = (sp - (uintptr_t)(exec_args.envc + 1) * sizeof(uintptr_t)) & ~(uintptr_t)15;
+  uintptr_t envp = sp;
+  uintptr_t *env_words = (uintptr_t *)(stack_pa + sp - stack_base);
+  for (int i = 0; i < exec_args.envc; i++) env_words[i] = envp_guest[i];
+  env_words[exec_args.envc] = 0;
+
+  sp -= (uintptr_t)(exec_args.argc + 1) * sizeof(uintptr_t);
+  uintptr_t argv = sp;
+  uintptr_t *arg_words = (uintptr_t *)(stack_pa + sp - stack_base);
+  for (int i = 0; i < exec_args.argc; i++) arg_words[i] = argv_guest[i];
+  arg_words[exec_args.argc] = 0;
+
+  exec_argv_guest = argv;
+  exec_envp_guest = envp;
+  sp &= ~(uintptr_t)15;
+  return sp;
+}
+
+static uintptr_t loader(PCB *pcb, const char *filename, uintptr_t *args_ptr) {
   int fd = fs_open(filename, 0, 0);
   assert(fd >= 0);
 
@@ -487,13 +571,16 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
         stack_pa + (uintptr_t)i * PGSIZE, MMAP_READ | MMAP_WRITE);
   }
 
+  *args_ptr = build_stack(stack_pa);
+
   pcb->max_brk = ROUNDUP(max_va, PGSIZE);
   return eh.e_entry;
 }
 
-void naive_uload(PCB *pcb, const char *filename) {
+static void load_and_jump(PCB *pcb, const char *filename) {
   protect(&pcb->as);
-  uintptr_t entry = loader(pcb, filename);
+  uintptr_t args = 0;
+  uintptr_t entry = loader(pcb, filename, &args);
   current = pcb;
   Log("Jump to entry = %p", entry);
   uintptr_t satp_value = (uintptr_t)1u << 31 | ((uintptr_t)pcb->as.ptr >> 12);
@@ -501,16 +588,26 @@ void naive_uload(PCB *pcb, const char *filename) {
       "csrw satp, %0\n\t"
       "sfence.vma\n\t"
       "mv sp, %1\n\t"
+      "mv a0, %3\n\t"
+      "mv a1, %4\n\t"
+      "mv a2, %5\n\t"
       "jr %2"
-      : : "r"(satp_value), "r"(USER_STACK_TOP - 16), "r"(entry));
+      : : "r"(satp_value), "r"(args), "r"(entry),
+          "r"(exec_args.argc), "r"(exec_argv_guest), "r"(exec_envp_guest));
   while (1);
 }
 
-void naive_execve(const char *filename) {
+void naive_uload(PCB *pcb, const char *filename) {
+  capture_exec_args(filename, NULL, NULL);
+  load_and_jump(pcb, filename);
+}
+
+void naive_execve(const char *filename, const char **argv, const char **envp) {
   static PCB execve_pcb;
   memset(&execve_pcb, 0, sizeof(execve_pcb));
+  capture_exec_args(filename, argv, envp);
   Log("execve: %s", filename);
-  naive_uload(&execve_pcb, filename);
+  load_and_jump(&execve_pcb, filename);
 }
 ''',
             encoding="ascii",
@@ -520,6 +617,7 @@ void naive_execve(const char *filename) {
             r'''#include <proc.h>
 #include <elf.h>
 #include <fs.h>
+#include <string.h>
 
 #ifdef __LP64__
 # define Elf_Ehdr Elf64_Ehdr
@@ -534,7 +632,94 @@ size_t fs_read(int fd, void *buf, size_t len);
 size_t fs_lseek(int fd, size_t offset, int whence);
 int fs_close(int fd);
 
-static uintptr_t loader(PCB *pcb, const char *filename) {
+#define EXEC_MAX_ARGS 16
+#define EXEC_STRING_MAX 128
+#define EXEC_STACK_TOP 0x87fff000u
+#define EXEC_STACK_SIZE (8 * PGSIZE)
+
+typedef struct {
+  int argc;
+  int envc;
+  char args[EXEC_MAX_ARGS][EXEC_STRING_MAX];
+  char envs[EXEC_MAX_ARGS][EXEC_STRING_MAX];
+} ExecArgs;
+
+static ExecArgs exec_args;
+static uintptr_t exec_argv_guest;
+static uintptr_t exec_envp_guest;
+
+static void copy_string(char *dst, const char *src) {
+  int i = 0;
+  if (src != NULL) {
+    for (; i < EXEC_STRING_MAX - 1 && src[i] != '\0'; i++) {
+      dst[i] = src[i];
+    }
+  }
+  dst[i] = '\0';
+}
+
+static int copy_vector(uintptr_t vector, char dst[][EXEC_STRING_MAX]) {
+  int count = 0;
+  if (vector == 0) return 0;
+  while (count < EXEC_MAX_ARGS) {
+    const char *src = ((const char **)vector)[count];
+    if (src == NULL) break;
+    copy_string(dst[count], src);
+    count++;
+  }
+  return count;
+}
+
+static void capture_exec_args(const char *filename, const char **argv,
+                              const char **envp) {
+  memset(&exec_args, 0, sizeof(exec_args));
+  exec_args.argc = copy_vector((uintptr_t)argv, exec_args.args);
+  if (exec_args.argc == 0) {
+    copy_string(exec_args.args[0], filename);
+    exec_args.argc = 1;
+  }
+  exec_args.envc = copy_vector((uintptr_t)envp, exec_args.envs);
+}
+
+static uintptr_t build_stack(void) {
+  const uintptr_t stack_base = EXEC_STACK_TOP - EXEC_STACK_SIZE;
+  uintptr_t argv_guest[EXEC_MAX_ARGS];
+  uintptr_t envp_guest[EXEC_MAX_ARGS];
+  uintptr_t sp = EXEC_STACK_TOP;
+
+  for (int i = exec_args.argc - 1; i >= 0; i--) {
+    size_t len = strlen(exec_args.args[i]) + 1;
+    sp = (sp - (uintptr_t)len) & ~(uintptr_t)3;
+    memcpy((void *)sp, exec_args.args[i], len);
+    argv_guest[i] = sp;
+  }
+  for (int i = exec_args.envc - 1; i >= 0; i--) {
+    size_t len = strlen(exec_args.envs[i]) + 1;
+    sp = (sp - (uintptr_t)len) & ~(uintptr_t)3;
+    memcpy((void *)sp, exec_args.envs[i], len);
+    envp_guest[i] = sp;
+  }
+
+  sp = (sp - (uintptr_t)(exec_args.envc + 1) * sizeof(uintptr_t)) & ~(uintptr_t)15;
+  uintptr_t envp = sp;
+  uintptr_t *env_words = (uintptr_t *)envp;
+  for (int i = 0; i < exec_args.envc; i++) env_words[i] = envp_guest[i];
+  env_words[exec_args.envc] = 0;
+
+  sp -= (uintptr_t)(exec_args.argc + 1) * sizeof(uintptr_t);
+  uintptr_t argv = sp;
+  uintptr_t *arg_words = (uintptr_t *)argv;
+  for (int i = 0; i < exec_args.argc; i++) arg_words[i] = argv_guest[i];
+  arg_words[exec_args.argc] = 0;
+
+  exec_argv_guest = argv;
+  exec_envp_guest = envp;
+  sp &= ~(uintptr_t)15;
+  (void)stack_base;
+  return sp;
+}
+
+static uintptr_t loader(PCB *pcb, const char *filename, uintptr_t *args_ptr) {
   (void)pcb;
   int fd = fs_open(filename, 0, 0);
   assert(fd >= 0);
@@ -555,20 +740,36 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
     memset((void *)(ph.p_vaddr + ph.p_filesz), 0, ph.p_memsz - ph.p_filesz);
   }
   fs_close(fd);
+  *args_ptr = build_stack();
   return eh.e_entry;
 }
 
-void naive_uload(PCB *pcb, const char *filename) {
-  uintptr_t entry = loader(pcb, filename);
+static void load_and_jump(PCB *pcb, const char *filename) {
+  uintptr_t args = 0;
+  uintptr_t entry = loader(pcb, filename, &args);
   Log("Jump to entry = %p", entry);
-  ((void(*)())entry) ();
+  asm volatile(
+      "mv sp, %0\n\t"
+      "mv a0, %1\n\t"
+      "mv a1, %2\n\t"
+      "mv a2, %3\n\t"
+      "jr %4"
+      : : "r"(args), "r"(exec_args.argc), "r"(exec_argv_guest),
+          "r"(exec_envp_guest), "r"(entry));
+  while (1);
 }
 
-void naive_execve(const char *filename) {
-  PCB pcb;
-  uintptr_t entry = loader(&pcb, filename);
-  Log("execve: %s -> entry = %p", filename, entry);
-  ((void(*)())entry) ();
+void naive_uload(PCB *pcb, const char *filename) {
+  capture_exec_args(filename, NULL, NULL);
+  load_and_jump(pcb, filename);
+}
+
+void naive_execve(const char *filename, const char **argv, const char **envp) {
+  static PCB execve_pcb;
+  memset(&execve_pcb, 0, sizeof(execve_pcb));
+  capture_exec_args(filename, argv, envp);
+  Log("execve: %s -> entry", filename);
+  load_and_jump(&execve_pcb, filename);
 }
 ''',
         encoding="ascii",
@@ -586,7 +787,7 @@ size_t fs_lseek(int fd, size_t offset, int whence);
 int fs_close(int fd);
 int mm_brk(uintptr_t brk);
 void naive_uload(PCB *pcb, const char *filename);
-void naive_execve(const char *filename);
+void naive_execve(const char *filename, const char **argv, const char **envp);
 
 static PCB batch_pcb;
 static const char *batch_programs[] = {
@@ -649,7 +850,8 @@ void do_syscall(Context *c) {
       break;
     }
     case SYS_execve:
-      naive_execve((const char *)a[1]);
+      naive_execve((const char *)a[1], (const char **)a[2],
+                   (const char **)a[3]);
       break;
     default:
       panic("Unhandled syscall ID = %d", a[0]);
@@ -735,13 +937,11 @@ int main() {
 int main(int argc, char *argv[], char *envp[]);
 void _exit(int status);
 
-char **environ;
+extern char **environ;
 
-void call_main(uintptr_t *args) {
-  (void)args;
-  char *empty[] = { 0 };
-  environ = empty;
-  _exit(main(0, empty, empty));
+void call_main(int argc, char **argv, char **envp) {
+  environ = envp;
+  _exit(main(argc, argv, envp));
   while (1) {
   }
 }
@@ -872,8 +1072,7 @@ int snprintf(char *out, size_t n, const char *fmt, ...) {
 
     syscall_suffix = r'''
 int _execve(const char *fname, char * const argv[], char *const envp[]) {
-  (void)argv; (void)envp;
-  _syscall_(SYS_execve, (intptr_t)fname, 0, 0);
+  _syscall_(SYS_execve, (intptr_t)fname, (intptr_t)argv, (intptr_t)envp);
   return -1;
 }
 

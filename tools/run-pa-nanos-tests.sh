@@ -192,6 +192,8 @@ case "${app_dir}" in
     ramdisk_tests="dummy ${app_dir#tests/}"
     if [ "${app_name}" = "execve-test" ]; then
       ramdisk_tests="dummy hello execve-test"
+    elif [ "${app_name}" = "execve-args-test" ]; then
+      ramdisk_tests="dummy exec-test"
     fi
     ;;
   *)
@@ -317,6 +319,11 @@ case "${app_name}" in
       sed -n '1,120p' "${work_root}/run-nanos.log"
       exit 1
     fi
+    ;;
+  execve-args-test)
+    require_output "exec-test: argv\[1\] = 1"
+    require_output "exec-test: argv\[1\] = 2"
+    echo "execve argv propagation OK"
     ;;
   bird)
     if grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then

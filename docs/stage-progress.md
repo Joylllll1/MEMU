@@ -45,7 +45,8 @@ changes.
   direct-syscall hello-to-dummy smoke, official Navy libc/newlib hello smoke,
   NSlider multi-slide navigation with real generated slide assets and keyboard
   injection, standalone NDL draw/event/timer test, Flappy Bird miniSDL game
-  running under batch mode, and execve-style program replacement. PAL's
+  running under batch mode, and execve-style program replacement with argv/envp
+  propagation. PAL's
   interactive display/audio verification remains host-dependent.
 - The full libc smoke uses downloaded compiler-rt/newlib sources and excludes
   three riscv32-incompatible newlib sources in the temporary tree:
@@ -55,6 +56,10 @@ changes.
   scaffold demonstrates same-VA isolation with timer preemption, and the
   real PA4 path runs official Navy hello under Nanos-lite HAS_VME paging
   through `make pa-vme-test`.
+- PA4 final integration remains open: the GitBook's MENU/NWM-style foreground
+  switching demo needs real process creation, file-descriptor duplication,
+  and multiple concurrently runnable Navy processes; MEMU currently has the
+  CTE/context, timer, and Sv32 core gates but not that full desktop demo.
 - PAL audio compatibility fix: the temporary Navy PAL build now explicitly
   initializes DOSBox OPL lookup tables instead of relying on guest C++ global
   constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
@@ -329,7 +334,9 @@ NDL draw app: pass through `make pa-ndl-test`; standalone test exercises
 NDL_Init/OpenCanvas/DrawRect/GetTicks/PollEvent/Quit
 Flappy Bird miniSDL game: pass through `make pa-bird-test`; PNG sprites load
 via stb_image IMG_Load and the game runs 50M instructions without crashing
-Nanos-lite execve-style program replacement: pass through `make pa-execve-test`
+Nanos-lite execve-style program replacement: pass through `make pa-execve-test`;
+argv propagation: pass through `make pa-execve-args-test`, using PA's
+`tests/exec-test` to verify `argv[1]` survives repeated replacement
 PAL: bounded rendering pass; `make pa-pal-test` uses `.local/pal-data`, normalizes case-sensitive resource names, stages writable `sdlpal.cfg` plus five save slots, syncs them back after interactive exit, reaches the instruction limit, and compiles the Navy `/dev/sbctl`/`/dev/sb` PCM path into MEMU's SDL audio queue. `make pal-sdl` remains for host display/audio verification.
 ```
 
@@ -804,7 +811,9 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   checksum/trace validation.
 - Real Nanos-lite remains a compatibility target; the current Stage 6 package
   provides MEMU-local syscall and batch-list fixtures, and `make pa-nanos-tests`
-  now validates one real Nanos-lite + Navy hello-to-dummy smoke.
+  now validates one real Nanos-lite + Navy hello-to-dummy smoke. The temporary
+  PA compatibility patch also builds a user stack with argc/argv/envp for
+  execve, covered by `make pa-execve-args-test`.
 - Real Navy-apps/miniSDL remain compatibility targets; the current Stage 7
   package provides MEMU-local ramdisk, fd, special-file, and fs-loader fixtures.
   The local checkout now has `navy-apps`; the official libc/newlib hello,
