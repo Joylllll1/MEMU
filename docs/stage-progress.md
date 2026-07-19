@@ -829,13 +829,13 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 
 - Stage 8 core acceptance passes both locally (`make stage8-test`) and through
   the real Navy hello paging path (`make pa-vme-test`). PA4 process creation,
-  blocking wait, fd duplication, shared memfd mapping, and official NWM event
-  loop now pass `make pa-fork-test`, `make pa-memfd-test`,
-  `make pa-vfork-test`, `make pa-fd-test`, and `make pa-nwm-test`; the NWM
-  ramdisk now also contains the official `/bin/nterm`, but its foreground
-  child spawn still needs a context/fd fix before interactive MENU/NWM
-  acceptance can close. Full Stage 7/PA3 acceptance is still open until
-  PAL/仙剑 reaches a visible scene.
+  blocking wait, fd duplication, shared memfd mapping, official NWM event loop,
+  and the NWM child window path now pass `make pa-fork-test`,
+  `make pa-memfd-test`, `make pa-vfork-test`, `make pa-fd-test`,
+  `make pa-nwm-test`, and `make pa-nwm-child-test`; the latter verifies
+  `/bin/nterm` exec plus the resize and shared framebuffer handshake. Manual
+  SDL MENU/focus/window interaction remains open. Full Stage 7/PA3 acceptance
+  is still open until PAL/仙剑 reaches a visible scene.
 - SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
   AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,
   and Flappy Bird "any key" all work; closing the SDL window is a clean

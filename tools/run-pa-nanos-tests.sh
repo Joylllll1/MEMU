@@ -55,6 +55,7 @@ fingerprint="$({ cat "$0" \
       "${script_dir}/patch-pa-nemu-ioe.py" \
       "${script_dir}/patch-pa-nanos-lite.py" \
       "${script_dir}/patch-pa-navy-ndl.py" \
+      "${script_dir}/patch-pa-nwm-test.py" \
       "${script_dir}/patch-pa-pal.py" \
       "${script_dir}/mkbin/gen_slides.py" \
       "${script_dir}/mkbin/convert_slides.py" \
@@ -111,6 +112,16 @@ if [ "${ndl}" = 1 ]; then
 fi
 if [ "${app_name}" = "pal" ]; then
   python3 "${script_dir}/patch-pa-pal.py" "${navy_home}/${app_dir}/repo"
+fi
+if [ "${app_name}" = "nwm" ]; then
+  nwm_patch_args="${navy_home}/apps/nwm"
+  if [ "${PA_NANOS_NWM_AUTOSPAWN:-0}" = 1 ]; then
+    nwm_patch_args="${nwm_patch_args} autospawn"
+  fi
+  # Keep NWM's first frame safe while a child is still negotiating its size.
+  # The optional autospawn argument is used only by the bounded child test.
+  # shellcheck disable=SC2086
+  python3 "${script_dir}/patch-pa-nwm-test.py" ${nwm_patch_args}
 fi
 
 if [ "${app_name}" = "ndl-test" ]; then
@@ -459,7 +470,12 @@ case "${app_name}" in
       exit 1
     fi
     require_output "instruction limit reached"
-    echo "NWM boots and runs its event loop under Sv32"
+    if [ "${PA_NANOS_NWM_AUTOSPAWN:-0}" = 1 ]; then
+      require_output "execve: /bin/nterm"
+      echo "NWM fork/exec and child framebuffer path OK under Sv32"
+    else
+      echo "NWM boots and runs its event loop under Sv32"
+    fi
     ;;
   memfd-test)
     require_output "memfd-test: values=12345678,9abcdef0"

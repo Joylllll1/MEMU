@@ -1064,6 +1064,9 @@ void naive_execve(const char *filename, const char **argv, const char **envp) {
 #define SYS_mmap 24
 #define SYS_munmap 25
 #define SYS_memfd_create 26
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 int fs_open(const char *pathname, int flags, int mode);
 size_t fs_read(int fd, void *buf, size_t len);
@@ -1122,6 +1125,7 @@ typedef struct {
 } MemFd;
 
 static FdEntry fd_table[FD_TABLES][MAX_PROCESS_FDS];
+static size_t fd_offset[FD_TABLES][MAX_PROCESS_FDS];
 static int fd_initialized[FD_TABLES];
 static Pipe pipes[MAX_PIPES];
 static MemFd memfds[MAX_MEMFDS];
@@ -1167,6 +1171,7 @@ static void fd_release_table(int slot) {
   fd_init(slot);
   for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
     fd_drop(&fd_table[slot][fd]);
+    fd_offset[slot][fd] = 0;
     mmap_addr[slot][fd] = 0;
     mmap_length[slot][fd] = 0;
   }
@@ -1204,6 +1209,7 @@ void process_clone_fds(int parent_index, int child_index) {
   fd_init(child_index);
   for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
     fd_table[child_index][fd] = fd_table[parent][fd];
+    fd_offset[child_index][fd] = fd_offset[parent][fd];
     fd_retain(fd_table[child_index][fd]);
   }
 }
@@ -1350,8 +1356,11 @@ static ssize_t fd_read(int slot, int fd, void *buf, size_t len) {
   if (entry.kind == FD_FILE) return (ssize_t)fs_read(entry.target, buf, len);
   if (entry.kind == FD_MEMFD) {
     MemFd *memfd = &memfds[entry.target];
-    size_t actual = len < memfd->size ? len : memfd->size;
-    memcpy(buf, memfd->data, actual);
+    if (fd_offset[slot][fd] >= memfd->size) return 0;
+    size_t avail = memfd->size - fd_offset[slot][fd];
+    size_t actual = len < avail ? len : avail;
+    memcpy(buf, memfd->data + fd_offset[slot][fd], actual);
+    fd_offset[slot][fd] += actual;
     return (ssize_t)actual;
   }
   return -1;
@@ -1369,8 +1378,11 @@ static ssize_t fd_write(int slot, int fd, const void *buf, size_t len) {
   if (entry.kind == FD_FILE) return (ssize_t)fs_write(entry.target, buf, len);
   if (entry.kind == FD_MEMFD) {
     MemFd *memfd = &memfds[entry.target];
-    size_t actual = len < memfd->size ? len : memfd->size;
-    memcpy(memfd->data, buf, actual);
+    if (fd_offset[slot][fd] >= memfd->size) return 0;
+    size_t avail = memfd->size - fd_offset[slot][fd];
+    size_t actual = len < avail ? len : avail;
+    memcpy(memfd->data + fd_offset[slot][fd], buf, actual);
+    fd_offset[slot][fd] += actual;
     return (ssize_t)actual;
   }
   return -1;
@@ -1390,6 +1402,7 @@ static int fd_open(int slot, const char *pathname, int flags, int mode) {
     return -1;
   }
   fd_table[slot][guest_fd] = (FdEntry){FD_FILE, raw_fd};
+  fd_offset[slot][guest_fd] = 0;
   return guest_fd;
 }
 
@@ -1400,6 +1413,7 @@ static int fd_close(int slot, int fd) {
   if (entry.kind == FD_NONE) return -1;
   if (entry.kind == FD_FILE) fs_close(entry.target);
   fd_drop(&fd_table[slot][fd]);
+  fd_offset[slot][fd] = 0;
   return 0;
 }
 
@@ -1407,7 +1421,17 @@ static int fd_lseek(int slot, int fd, size_t offset, int whence) {
   fd_init(slot);
   if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
   FdEntry entry = fd_table[slot][fd];
-  return entry.kind == FD_FILE ? fs_lseek(entry.target, offset, whence) : -1;
+  if (entry.kind == FD_FILE) return fs_lseek(entry.target, offset, whence);
+  if (entry.kind != FD_MEMFD) return -1;
+  MemFd *memfd = &memfds[entry.target];
+  size_t next = 0;
+  if (whence == SEEK_SET) next = offset;
+  else if (whence == SEEK_CUR) next = fd_offset[slot][fd] + offset;
+  else if (whence == SEEK_END) next = memfd->size + offset;
+  else return -1;
+  if (next > memfd->size) return -1;
+  fd_offset[slot][fd] = next;
+  return (int)next;
 }
 
 static PCB batch_pcb;
@@ -1510,6 +1534,7 @@ Context *do_syscall(Context *c) {
         c->GPRx = -1;
       } else {
         fd_table[slot][fd] = (FdEntry){FD_MEMFD, memfd};
+        fd_offset[slot][fd] = 0;
         c->GPRx = fd;
       }
       break;

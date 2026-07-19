@@ -14,6 +14,7 @@ NDL_SOURCE = r'''#include <fcntl.h>
 
 static int evtdev = -1;
 static int fbdev = -1;
+static int nwm_app = 0;
 static int sbctl = -1;
 static int sb = -1;
 static int disp_w = 0;
@@ -53,6 +54,21 @@ static void read_dispinfo(void) {
 }
 
 void NDL_OpenCanvas(int *w, int *h) {
+  if (nwm_app) {
+    canvas_w = *w;
+    canvas_h = *h;
+    fbdev = 5;
+    char buf[64];
+    int len = snprintf(buf, sizeof(buf), "%d %d", *w, *h);
+    if (write(4, buf, (size_t)len) != len) return;
+    while (1) {
+      int nread = read(3, buf, sizeof(buf) - 1);
+      if (nread <= 0) continue;
+      buf[nread] = '\0';
+      if (strcmp(buf, "mmap ok") == 0) break;
+    }
+    return;
+  }
   read_dispinfo();
   if (*w == 0 || *h == 0) {
     *w = disp_w;
@@ -85,6 +101,14 @@ void NDL_OpenCanvas(int *w, int *h) {
 void NDL_DrawRect(uint32_t *pixels, int x, int y, int w, int h) {
   if (fbdev < 0 || pixels == NULL || w <= 0 || h <= 0) return;
   if (x < 0 || y < 0 || x + w > canvas_w || y + h > canvas_h) return;
+  if (nwm_app) {
+    for (int row = 0; row < h; row++) {
+      off_t offset = (off_t)((y + row) * canvas_w + x) * (off_t)sizeof(uint32_t);
+      if (lseek(fbdev, offset, SEEK_SET) < 0) return;
+      if (write(fbdev, pixels + row * w, (size_t)w * sizeof(uint32_t)) < 0) return;
+    }
+    return;
+  }
   if (shadow == NULL) {
     for (int row = 0; row < h; row++) {
       off_t offset = (off_t)((off_y + y + row) * disp_w + off_x + x) * (off_t)sizeof(uint32_t);
@@ -139,7 +163,8 @@ int NDL_QueryAudio() {
 
 int NDL_Init(uint32_t flags) {
   (void)flags;
-  if (evtdev < 0) evtdev = open("/dev/events", O_RDONLY);
+  nwm_app = getenv("NWM_APP") != NULL;
+  if (evtdev < 0) evtdev = nwm_app ? 3 : open("/dev/events", O_RDONLY);
   return 0;
 }
 
@@ -149,6 +174,7 @@ void NDL_Quit() {
   NDL_CloseAudio();
   evtdev = -1;
   fbdev = -1;
+  nwm_app = 0;
   free(shadow);
   shadow = NULL;
   free(rowbuf);
