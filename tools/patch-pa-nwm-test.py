@@ -37,6 +37,25 @@ def main() -> None:
     if copy_marker in window_text:
         window_text = window_text.replace(copy_marker, copy_guard, 1)
     window.write_text(window_text, encoding="ascii")
+
+    events = path.parent / "events.cpp"
+    events_text = events.read_text(encoding="ascii")
+    if "MEMU_SYS_YIELD" not in events_text:
+        events_text = events_text.replace(
+            "#include <nwm.h>\n",
+            "#include <nwm.h>\n"
+            "extern \"C\" intptr_t _syscall_(intptr_t, intptr_t, intptr_t, intptr_t);\n"
+            "#define MEMU_SYS_YIELD 1\n",
+            1,
+        )
+        events_text = events_text.replace(
+            "        spawn(appfinder->getcmd(), (const char **)appfinder->getargv()); // fall through\n",
+            "        spawn(appfinder->getcmd(), (const char **)appfinder->getargv()); // fall through\n"
+            "        _syscall_(MEMU_SYS_YIELD, 0, 0, 0);\n",
+            1,
+        )
+    events.write_text(events_text, encoding="ascii")
+
     if autospawn and "extern intptr_t _syscall_" not in text:
         text = text.replace(
             "#include <NDL.h>\n",
