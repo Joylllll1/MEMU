@@ -100,6 +100,13 @@ static PCB *next_runnable(void) {
   return NULL;
 }
 
+int process_slot(void) {
+  return proc_index(current);
+}
+
+void process_clone_fds(int parent_index, int child_index);
+void process_release_fds(int process_index);
+
 Context *process_schedule(Context *prev) {
   if (!process_is_managed()) return prev;
   int current_index = proc_index(current);
@@ -139,6 +146,7 @@ Context *process_fork(Context *parent_ctx) {
 
   PCB *parent = current;
   PCB *child = &pcb[child_index];
+  process_clone_fds(parent_index, child_index);
   parent->cp = context_slot(parent);
   *parent->cp = *parent_ctx;
   proc_pid[child_index] = next_pid++;
@@ -157,6 +165,7 @@ Context *process_fork(Context *parent_ctx) {
 Context *process_exit(Context *prev) {
   if (!process_is_managed()) return NULL;
   int index = proc_index(current);
+  process_release_fds(index);
   proc_state[index] = PROC_EXITED;
   PCB *parent = wait_parent[index];
   int parent_index = proc_index(parent);
@@ -907,6 +916,10 @@ void naive_execve(const char *filename, const char **argv, const char **envp) {
 #include <proc.h>
 #include "syscall.h"
 
+#define SYS_pipe 20
+#define SYS_dup 21
+#define SYS_dup2 22
+
 int fs_open(const char *pathname, int flags, int mode);
 size_t fs_read(int fd, void *buf, size_t len);
 size_t fs_write(int fd, const void *buf, size_t len);
@@ -916,9 +929,240 @@ int mm_brk(uintptr_t brk);
 void naive_uload(PCB *pcb, const char *filename);
 void naive_execve(const char *filename, const char **argv, const char **envp);
 bool process_is_managed(void);
+int process_slot(void);
 Context *process_schedule(Context *prev);
 Context *process_fork(Context *parent_ctx);
 Context *process_exit(Context *prev);
+
+#define FD_TABLES 5
+#define MAX_PROCESS_FDS 32
+#define MAX_PIPES 8
+#define PIPE_CAPACITY 4096
+
+typedef long ssize_t;
+
+enum {
+  FD_NONE,
+  FD_SERIAL,
+  FD_FILE,
+  FD_PIPE_READ,
+  FD_PIPE_WRITE,
+};
+
+typedef struct {
+  int kind;
+  int target;
+} FdEntry;
+
+typedef struct {
+  int used;
+  int nonblock;
+  size_t read_pos;
+  size_t size;
+  int readers;
+  int writers;
+  uint8_t data[PIPE_CAPACITY];
+} Pipe;
+
+static FdEntry fd_table[FD_TABLES][MAX_PROCESS_FDS];
+static int fd_initialized[FD_TABLES];
+static Pipe pipes[MAX_PIPES];
+
+static int fd_owner(void) {
+  int slot = process_slot();
+  return slot >= 0 && slot < FD_TABLES - 1 ? slot : FD_TABLES - 1;
+}
+
+static void fd_init(int slot) {
+  if (fd_initialized[slot]) return;
+  fd_initialized[slot] = 1;
+  fd_table[slot][0] = (FdEntry){FD_SERIAL, 0};
+  fd_table[slot][1] = (FdEntry){FD_SERIAL, 1};
+  fd_table[slot][2] = (FdEntry){FD_SERIAL, 2};
+}
+
+static void pipe_release(int pipe_id, int kind) {
+  if (pipe_id < 0 || pipe_id >= MAX_PIPES || !pipes[pipe_id].used) return;
+  if (kind == FD_PIPE_READ && pipes[pipe_id].readers > 0) {
+    pipes[pipe_id].readers--;
+  }
+  if (kind == FD_PIPE_WRITE && pipes[pipe_id].writers > 0) {
+    pipes[pipe_id].writers--;
+  }
+  if (pipes[pipe_id].readers == 0 && pipes[pipe_id].writers == 0) {
+    memset(&pipes[pipe_id], 0, sizeof(pipes[pipe_id]));
+  }
+}
+
+static void fd_drop(FdEntry *entry) {
+  if (entry->kind == FD_PIPE_READ || entry->kind == FD_PIPE_WRITE) {
+    pipe_release(entry->target, entry->kind);
+  }
+  entry->kind = FD_NONE;
+  entry->target = -1;
+}
+
+static void fd_release_table(int slot) {
+  fd_init(slot);
+  for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
+    fd_drop(&fd_table[slot][fd]);
+  }
+  fd_initialized[slot] = 0;
+}
+
+static void fd_retain(FdEntry entry) {
+  if (entry.kind == FD_PIPE_READ) pipes[entry.target].readers++;
+  if (entry.kind == FD_PIPE_WRITE) pipes[entry.target].writers++;
+}
+
+static int fd_assign(int slot, int fd, FdEntry entry) {
+  if (fd < 0 || fd >= MAX_PROCESS_FDS || entry.kind == FD_NONE) return -1;
+  fd_drop(&fd_table[slot][fd]);
+  fd_table[slot][fd] = entry;
+  fd_retain(entry);
+  return fd;
+}
+
+static int fd_alloc(int slot) {
+  fd_init(slot);
+  for (int fd = 3; fd < MAX_PROCESS_FDS; fd++) {
+    if (fd_table[slot][fd].kind == FD_NONE) return fd;
+  }
+  return -1;
+}
+
+void process_clone_fds(int parent_index, int child_index) {
+  int parent = parent_index >= 0 && parent_index < FD_TABLES - 1
+                   ? parent_index : FD_TABLES - 1;
+  if (child_index < 0 || child_index >= FD_TABLES - 1) return;
+  fd_init(parent);
+  fd_release_table(child_index);
+  fd_init(child_index);
+  for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
+    fd_table[child_index][fd] = fd_table[parent][fd];
+    fd_retain(fd_table[child_index][fd]);
+  }
+}
+
+void process_release_fds(int process_index) {
+  if (process_index >= 0 && process_index < FD_TABLES - 1) {
+    fd_release_table(process_index);
+  }
+}
+
+static int pipe_create(int slot, int pipefd[2], int flags) {
+  if (pipefd == NULL) return -1;
+  int pipe_id = -1;
+  for (int i = 0; i < MAX_PIPES; i++) {
+    if (!pipes[i].used) {
+      pipe_id = i;
+      break;
+    }
+  }
+  int read_fd = fd_alloc(slot);
+  if (pipe_id < 0 || read_fd < 0) return -1;
+  pipes[pipe_id].used = 1;
+  pipes[pipe_id].nonblock = flags != 0;
+  pipes[pipe_id].readers = 1;
+  pipes[pipe_id].writers = 1;
+  fd_table[slot][read_fd] = (FdEntry){FD_PIPE_READ, pipe_id};
+  int write_fd = fd_alloc(slot);
+  if (write_fd < 0) {
+    fd_drop(&fd_table[slot][read_fd]);
+    memset(&pipes[pipe_id], 0, sizeof(pipes[pipe_id]));
+    return -1;
+  }
+  fd_table[slot][write_fd] = (FdEntry){FD_PIPE_WRITE, pipe_id};
+  pipefd[0] = read_fd;
+  pipefd[1] = write_fd;
+  return 0;
+}
+
+static ssize_t pipe_read(Pipe *pipe, void *buf, size_t len) {
+  if (len == 0) return 0;
+  if (pipe->size == 0) return pipe->writers == 0 ? 0 : -1;
+  size_t actual = len < pipe->size ? len : pipe->size;
+  uint8_t *out = (uint8_t *)buf;
+  for (size_t i = 0; i < actual; i++) {
+    out[i] = pipe->data[(pipe->read_pos + i) % PIPE_CAPACITY];
+  }
+  pipe->read_pos = (pipe->read_pos + actual) % PIPE_CAPACITY;
+  pipe->size -= actual;
+  return (ssize_t)actual;
+}
+
+static ssize_t pipe_write(Pipe *pipe, const void *buf, size_t len) {
+  if (pipe->readers == 0) return -1;
+  size_t room = PIPE_CAPACITY - pipe->size;
+  if (room == 0) return -1;
+  size_t actual = len < room ? len : room;
+  const uint8_t *in = (const uint8_t *)buf;
+  size_t write_pos = (pipe->read_pos + pipe->size) % PIPE_CAPACITY;
+  for (size_t i = 0; i < actual; i++) {
+    pipe->data[(write_pos + i) % PIPE_CAPACITY] = in[i];
+  }
+  pipe->size += actual;
+  return (ssize_t)actual;
+}
+
+static ssize_t fd_read(int slot, int fd, void *buf, size_t len) {
+  fd_init(slot);
+  if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
+  FdEntry entry = fd_table[slot][fd];
+  if (entry.kind == FD_PIPE_READ) return pipe_read(&pipes[entry.target], buf, len);
+  if (entry.kind == FD_SERIAL) {
+    return entry.target == 0 ? (ssize_t)fs_read(0, buf, len) : -1;
+  }
+  if (entry.kind == FD_FILE) return (ssize_t)fs_read(entry.target, buf, len);
+  return -1;
+}
+
+static ssize_t fd_write(int slot, int fd, const void *buf, size_t len) {
+  fd_init(slot);
+  if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
+  FdEntry entry = fd_table[slot][fd];
+  if (entry.kind == FD_PIPE_WRITE) return pipe_write(&pipes[entry.target], buf, len);
+  if (entry.kind == FD_SERIAL) {
+    return (entry.target == 1 || entry.target == 2) ?
+      (ssize_t)fs_write(entry.target, buf, len) : -1;
+  }
+  if (entry.kind == FD_FILE) return (ssize_t)fs_write(entry.target, buf, len);
+  return -1;
+}
+
+static int fd_open(int slot, const char *pathname, int flags, int mode) {
+  int raw_fd = fs_open(pathname, flags, mode);
+  if (raw_fd < 0) return raw_fd;
+  fd_init(slot);
+  int guest_fd = raw_fd;
+  if (guest_fd < 0 || guest_fd >= MAX_PROCESS_FDS ||
+      fd_table[slot][guest_fd].kind != FD_NONE) {
+    guest_fd = fd_alloc(slot);
+  }
+  if (guest_fd < 0) {
+    fs_close(raw_fd);
+    return -1;
+  }
+  fd_table[slot][guest_fd] = (FdEntry){FD_FILE, raw_fd};
+  return guest_fd;
+}
+
+static int fd_close(int slot, int fd) {
+  fd_init(slot);
+  if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
+  FdEntry entry = fd_table[slot][fd];
+  if (entry.kind == FD_NONE) return -1;
+  if (entry.kind == FD_FILE) fs_close(entry.target);
+  fd_drop(&fd_table[slot][fd]);
+  return 0;
+}
+
+static int fd_lseek(int slot, int fd, size_t offset, int whence) {
+  fd_init(slot);
+  if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
+  FdEntry entry = fd_table[slot][fd];
+  return entry.kind == FD_FILE ? fs_lseek(entry.target, offset, whence) : -1;
+}
 
 static PCB batch_pcb;
 static const char *batch_programs[] = {
@@ -956,20 +1200,50 @@ Context *do_syscall(Context *c) {
     case SYS_fork:
       return process_fork(c);
     case SYS_open:
-      c->GPRx = fs_open((const char *)a[1], a[2], a[3]);
+      c->GPRx = fd_open(fd_owner(), (const char *)a[1], a[2], a[3]);
       break;
     case SYS_read:
-      c->GPRx = fs_read(a[1], (void *)a[2], a[3]);
+      c->GPRx = fd_read(fd_owner(), a[1], (void *)a[2], a[3]);
       break;
     case SYS_write:
-      c->GPRx = fs_write(a[1], (const void *)a[2], a[3]);
+      c->GPRx = fd_write(fd_owner(), a[1], (const void *)a[2], a[3]);
       break;
     case SYS_close:
-      c->GPRx = fs_close(a[1]);
+      c->GPRx = fd_close(fd_owner(), a[1]);
       break;
     case SYS_lseek:
-      c->GPRx = fs_lseek(a[1], a[2], a[3]);
+      c->GPRx = fd_lseek(fd_owner(), a[1], a[2], a[3]);
       break;
+    case SYS_pipe:
+      c->GPRx = pipe_create(fd_owner(), (int *)a[1], a[2]);
+      break;
+    case SYS_dup:
+    {
+      int slot = fd_owner();
+      fd_init(slot);
+      int new_fd = fd_alloc(slot);
+      if (new_fd < 0 || a[1] < 0 || a[1] >= MAX_PROCESS_FDS ||
+          fd_table[slot][a[1]].kind == FD_NONE) {
+        c->GPRx = -1;
+      } else {
+        c->GPRx = fd_assign(slot, new_fd, fd_table[slot][a[1]]);
+      }
+      break;
+    }
+    case SYS_dup2:
+    {
+      int slot = fd_owner();
+      fd_init(slot);
+      if (a[1] < 0 || a[1] >= MAX_PROCESS_FDS || a[2] < 0 ||
+          a[2] >= MAX_PROCESS_FDS || fd_table[slot][a[1]].kind == FD_NONE) {
+        c->GPRx = -1;
+      } else if (a[1] == a[2]) {
+        c->GPRx = a[2];
+      } else {
+        c->GPRx = fd_assign(slot, a[2], fd_table[slot][a[1]]);
+      }
+      break;
+    }
     case SYS_brk:
       c->GPRx = mm_brk(a[1]);
       break;
@@ -1089,6 +1363,10 @@ void call_main(int argc, char **argv, char **envp) {
     syscall_common = r'''#include <stdint.h>
 #include <stddef.h>
 #include "syscall.h"
+
+#define SYS_pipe 20
+#define SYS_dup 21
+#define SYS_dup2 22
 
 typedef long ssize_t;
 typedef long off_t;
@@ -1264,18 +1542,19 @@ clock_t _times(void *buf) {
 }
 
 int pipe(int pipefd[2]) {
-  (void)pipefd;
-  return -1;
+  return _syscall_(SYS_pipe, (intptr_t)pipefd, 0, 0);
+}
+
+int pipe2(int pipefd[2], int flags) {
+  return _syscall_(SYS_pipe, (intptr_t)pipefd, flags, 0);
 }
 
 int dup(int oldfd) {
-  (void)oldfd;
-  return -1;
+  return _syscall_(SYS_dup, oldfd, 0, 0);
 }
 
 int dup2(int oldfd, int newfd) {
-  (void)oldfd; (void)newfd;
-  return -1;
+  return _syscall_(SYS_dup2, oldfd, newfd, 0);
 }
 
 unsigned int sleep(unsigned int seconds) {

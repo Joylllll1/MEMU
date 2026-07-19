@@ -60,6 +60,7 @@ fingerprint="$({ cat "$0" \
       "${script_dir}/mkbin/convert_slides.py" \
       "${script_dir}/mkbin/vfork-test.c" \
       "${script_dir}/mkbin/vfork-child.c" \
+      "${script_dir}/mkbin/fd-test.c" \
       "${script_dir}/prepare-pal-data.py"; \
     echo "${pa_home}"; } | cksum)"
 if [ "${MEMU_PA_FRESH:-0}" = 1 ] ||
@@ -148,6 +149,16 @@ include $(NAVY_HOME)/Makefile
 MAKEEOF
 fi
 
+if [ "${app_name}" = "fd-test" ]; then
+  mkdir -p "${navy_home}/tests/fd-test"
+  cp "${script_dir}/mkbin/fd-test.c" "${navy_home}/tests/fd-test/"
+  cat > "${navy_home}/tests/fd-test/Makefile" << 'MAKEEOF'
+NAME = fd-test
+SRCS = fd-test.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
@@ -215,6 +226,8 @@ case "${app_dir}" in
       ramdisk_tests="dummy exec-test"
     elif [ "${app_name}" = "vfork-test" ]; then
       ramdisk_tests="dummy vfork-child vfork-test"
+    elif [ "${app_name}" = "fd-test" ]; then
+      ramdisk_tests="dummy fd-test"
     fi
     ;;
   *)
@@ -359,6 +372,12 @@ case "${app_name}" in
       exit 1
     fi
     echo "vfork child exec and parent resume OK"
+    ;;
+  fd-test)
+    require_output "fd-test: pipe-data"
+    require_output "fd-test: dup2-data"
+    require_output "fd-test: PASS"
+    echo "pipe and fd duplication OK"
     ;;
   bird)
     if grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then

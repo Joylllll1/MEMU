@@ -60,8 +60,12 @@ changes.
   switching demo needs real process creation, file-descriptor duplication,
   and multiple concurrently runnable Navy processes; MEMU currently has the
   CTE/context, timer, and Sv32 core gates, plus a minimal vfork-style child
-  exec/exit path that returns to the blocked parent, but not that full desktop
-  demo.
+  exec/exit path that returns to the blocked parent. The first PA4 fd layer is
+  now present: per-process fd tables, bounded in-memory pipes, `pipe`/`pipe2`,
+  `dup`, `dup2`, and fd-aware `read`/`write`/`close` pass the real
+  `make pa-fd-test` integration gate. The full desktop demo is still open
+  because `wait` and multiple concurrently runnable Navy window processes are
+  not implemented yet.
 - PAL audio compatibility fix: the temporary Navy PAL build now explicitly
   initializes DOSBox OPL lookup tables instead of relying on guest C++ global
   constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
@@ -78,8 +82,18 @@ This real Nanos-lite/VME test creates a vfork-style child through the PA
 restores the parent's saved `Context` including its user stack and address
 space, and verifies the parent continues with `parent-after pid=2`. This is
 intentionally narrower than POSIX `fork`: the parent remains blocked until the
-child execs and exits. `pipe`, `dup`, `dup2`, and `wait` remain the next
-integration work for MENU/NWM.
+child execs and exits.
+
+The fd layer is covered by:
+
+```sh
+make pa-fd-test
+```
+
+This real Nanos-lite/VME test verifies pipe data transfer, stdout redirection
+through `dup2`, and restoration through a duplicated serial fd. The pipe is a
+bounded nonblocking teaching implementation; scheduler-backed blocking and
+`wait` remain part of the later MENU/NWM integration.
 
 ## Strict NEMU Alignment Rule
 
@@ -773,8 +787,8 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   tree, and validates yield/context-switch/timer-interrupt behavior on MEMU.
 - `tools/run-pa-nanos-tests.sh`: copies a PA checkout, builds real Nanos-lite
   with selected Navy apps/tests, and validates the Nanos loader/syscall/ramdisk
-  path on MEMU. It supports the direct hello batch, full libc hello, and the
-  bounded NSlider NDL/miniSDL smoke.
+  path on MEMU. It supports the direct hello batch, full libc hello, the
+  bounded NSlider NDL/miniSDL smoke, and the PA4 vfork/fd integration tests.
 - `tools/patch-pa-nemu-ioe.py`: patches only copied PA temp trees to enable
   riscv32-nemu AM audio/devscan behavior needed by MEMU compatibility tests.
 - `tools/patch-pa-nanos-lite.py`: patches only copied PA temp Nanos/Navy trees
@@ -790,6 +804,8 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   fixtures.
 - `tools/mkbin/fs_programs.py`: generator for Stage 7 fs user programs and
   ramdisk manifest source tree.
+- `tools/mkbin/fd-test.c`: real Navy libc pipe/dup/dup2 integration test used
+  by `make pa-fd-test`.
 - `tools/mkfs/mkfs.py`: packs a manifest into `tests/images/ramdisk.img`.
 - `tests/guest/toolchain/`: source, linker script, and start code for the
   RV32 GCC ELF smoke image.
@@ -798,8 +814,11 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 ## Notes For Next Session
 
 - Stage 8 core acceptance passes both locally (`make stage8-test`) and through
-  the real Navy hello paging path (`make pa-vme-test`). Full Stage 7/PA3
-  acceptance is still open until PAL/仙剑 reaches a visible scene.
+  the real Navy hello paging path (`make pa-vme-test`). The PA4 process
+  prework now also passes `make pa-vfork-test` and `make pa-fd-test`; full
+  MENU/NWM acceptance is still open until `wait` and concurrent foreground
+  processes are implemented. Full Stage 7/PA3 acceptance is still open until
+  PAL/仙剑 reaches a visible scene.
 - SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
   AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,
   and Flappy Bird "any key" all work; closing the SDL window is a clean
@@ -829,7 +848,8 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
   provides MEMU-local syscall and batch-list fixtures, and `make pa-nanos-tests`
   now validates one real Nanos-lite + Navy hello-to-dummy smoke. The temporary
   PA compatibility patch also builds a user stack with argc/argv/envp for
-  execve, covered by `make pa-execve-args-test`.
+  execve, covered by `make pa-execve-args-test`, and now provides per-process
+  pipe/dup/dup2 support covered by `make pa-fd-test`.
 - Real Navy-apps/miniSDL remain compatibility targets; the current Stage 7
   package provides MEMU-local ramdisk, fd, special-file, and fs-loader fixtures.
   The local checkout now has `navy-apps`; the official libc/newlib hello,
