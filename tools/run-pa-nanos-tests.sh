@@ -191,9 +191,17 @@ fi
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
+nwm_child_apps="${PA_NANOS_NWM_APPS:-nterm}"
 case "${app_dir}" in
   apps/*)
     ramdisk_apps="${app_dir#apps/}"
+    if [ "${app_name}" = "nwm" ]; then
+      # NWM's first appfinder entry is /bin/nterm. Build the child into the
+      # same image so the fork/exec/memfd window path is testable.
+      for child_app in ${nwm_child_apps}; do
+        ramdisk_apps="${ramdisk_apps} ${child_app}"
+      done
+    fi
     if [ "${app_name}" = "pal" ]; then
       mkdir -p "${navy_home}/fsimg/share/games"
       mkdir -p "${navy_home}/${app_dir}/repo/data"
@@ -281,6 +289,17 @@ if [ "${app_name}" = "bird" ]; then
   cp -r "${navy_home}/apps/bird/repo/res/"* "${navy_home}/fsimg/share/games/bird/"
 else
   PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
+  if [ "${app_name}" = "nwm" ]; then
+    for child_app in ${nwm_child_apps}; do
+      if [ "${child_app}" = "nterm" ]; then
+        # The upstream C++ source uses vfork without declaring it in its
+        # Navy headers. MEMU's fork path provides the same child-then-exec
+        # behavior needed here, so patch only the temporary checkout.
+        perl -pi -e 's/\bvfork\(\)/fork()/g' "${navy_home}/apps/nterm/src/extern-sh.cpp"
+      fi
+      PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/apps/${child_app}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
+    done
+  fi
   if [ "${app_name}" = "vfork-test" ]; then
     PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/tests/vfork-child" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
   elif [ "${app_name}" = "fork-test" ]; then

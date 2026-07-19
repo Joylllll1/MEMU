@@ -866,7 +866,8 @@ static void load_and_jump(PCB *pcb, const char *filename) {
 }
 
 void naive_uload(PCB *pcb, const char *filename) {
-  capture_exec_args(filename, NULL, NULL);
+  static const char *initial_env[] = {"NAVY_HOME=/", NULL};
+  capture_exec_args(filename, NULL, initial_env);
   load_and_jump(pcb, filename);
 }
 
@@ -1032,7 +1033,8 @@ static void load_and_jump(PCB *pcb, const char *filename) {
 }
 
 void naive_uload(PCB *pcb, const char *filename) {
-  capture_exec_args(filename, NULL, NULL);
+  static const char *initial_env[] = {"NAVY_HOME=/", NULL};
+  capture_exec_args(filename, NULL, initial_env);
   load_and_jump(pcb, filename);
 }
 
@@ -1124,6 +1126,8 @@ static int fd_initialized[FD_TABLES];
 static Pipe pipes[MAX_PIPES];
 static MemFd memfds[MAX_MEMFDS];
 static uintptr_t mmap_next[FD_TABLES];
+static uintptr_t mmap_addr[FD_TABLES][MAX_PROCESS_FDS];
+static size_t mmap_length[FD_TABLES][MAX_PROCESS_FDS];
 
 static int fd_owner(void) {
   int slot = process_slot();
@@ -1163,7 +1167,10 @@ static void fd_release_table(int slot) {
   fd_init(slot);
   for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
     fd_drop(&fd_table[slot][fd]);
+    mmap_addr[slot][fd] = 0;
+    mmap_length[slot][fd] = 0;
   }
+  mmap_next[slot] = 0;
   fd_initialized[slot] = 0;
 }
 
@@ -1303,15 +1310,33 @@ static void *fd_mmap(int slot, size_t length, int prot, int fd, size_t offset) {
   if (memfd < 0 || length == 0 || offset > memfds[memfd].size ||
       length > memfds[memfd].size - offset) return (void *)-1;
   size_t mapped = (length + PGSIZE - 1) & ~(size_t)(PGSIZE - 1);
-  uintptr_t base = mmap_next[slot];
-  if (base == 0) base = (current->max_brk + PGSIZE - 1) & ~(uintptr_t)(PGSIZE - 1);
+  uintptr_t base = mmap_addr[slot][fd];
+  if (base == 0) {
+    base = mmap_next[slot];
+    if (base == 0) base = (current->max_brk + PGSIZE - 1) & ~(uintptr_t)(PGSIZE - 1);
+  }
   if (base < 0x40000000u || base + mapped > 0x80000000u) return (void *)-1;
   for (size_t page = 0; page < mapped; page += PGSIZE) {
     map(&current->as, (void *)(base + page),
         memfds[memfd].data + offset + page, prot);
   }
-  mmap_next[slot] = base + mapped;
+  mmap_addr[slot][fd] = base;
+  if (mmap_length[slot][fd] < mapped) mmap_length[slot][fd] = mapped;
+  if (mmap_next[slot] < base + mapped) mmap_next[slot] = base + mapped;
   return (void *)base;
+}
+
+static int fd_munmap(int slot, uintptr_t addr, size_t length) {
+  (void)length;
+  fd_init(slot);
+  for (int fd = 0; fd < MAX_PROCESS_FDS; fd++) {
+    if (mmap_addr[slot][fd] == addr && length <= mmap_length[slot][fd]) {
+      mmap_addr[slot][fd] = 0;
+      mmap_length[slot][fd] = 0;
+      return 0;
+    }
+  }
+  return -1;
 }
 
 static ssize_t fd_read(int slot, int fd, void *buf, size_t len) {
@@ -1473,7 +1498,7 @@ Context *do_syscall(Context *c) {
                                    a[2], a[3]);
       break;
     case SYS_munmap:
-      c->GPRx = 0;
+      c->GPRx = fd_munmap(fd_owner(), a[1], a[2]);
       break;
     case SYS_memfd_create:
     {
@@ -1737,8 +1762,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 }
 
 int munmap(void *addr, size_t length) {
-  (void)addr; (void)length;
-  return (int)_syscall_(SYS_munmap, 0, 0, 0);
+  return (int)_syscall_(SYS_munmap, (intptr_t)addr, length, 0);
 }
 
 int memfd_create(const char *name, unsigned int flags) {
