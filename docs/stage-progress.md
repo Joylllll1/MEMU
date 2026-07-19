@@ -56,16 +56,16 @@ changes.
   scaffold demonstrates same-VA isolation with timer preemption, and the
   real PA4 path runs official Navy hello under Nanos-lite HAS_VME paging
   through `make pa-vme-test`.
-- PA4 final integration remains open: the GitBook's MENU/NWM-style foreground
-  switching demo needs real process creation, file-descriptor duplication,
-  and multiple concurrently runnable Navy processes; MEMU currently has the
-  CTE/context, timer, and Sv32 core gates, plus a minimal vfork-style child
-  exec/exit path that returns to the blocked parent. The first PA4 fd layer is
-  now present: per-process fd tables, bounded in-memory pipes, `pipe`/`pipe2`,
-  `dup`, `dup2`, and fd-aware `read`/`write`/`close` pass the real
-  `make pa-fd-test` integration gate. The full desktop demo is still open
-  because blocking `wait` and multiple concurrently runnable Navy window
-  processes are not implemented yet.
+- PA4 process integration now covers independent address spaces, multiple
+  concurrently runnable processes, per-process fd tables, bounded pipes,
+  `pipe`/`pipe2`, `dup`, `dup2`, blocking `wait` with status delivery, and
+  `execve`/exit/reap. The real `make pa-fork-test`, `make pa-vfork-test`, and
+  `make pa-fd-test` gates pass. Nanos-lite also provides shared memfd-backed
+  `mmap`/`munmap`/`ftruncate` compatibility, allowing the official NWM binary
+  to build and enter its event loop under Sv32 with `make pa-nwm-test`. The
+  final interactive MENU/NWM workflow remains an environment-dependent gate:
+  it still needs a bundled set of child Navy applications and manual SDL
+  focus/window verification.
 - PAL audio compatibility fix: the temporary Navy PAL build now explicitly
   initializes DOSBox OPL lookup tables instead of relying on guest C++ global
   constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
@@ -92,9 +92,22 @@ make pa-fd-test
 
 This real Nanos-lite/VME test verifies pipe data transfer, stdout redirection
 through `dup2`, and restoration through a duplicated serial fd. The pipe is a
-bounded nonblocking teaching implementation. The vfork test also verifies
-that an exited child can be reaped with `wait(&status)`; scheduler-backed
-blocking wait remains part of the later MENU/NWM integration.
+bounded nonblocking teaching implementation. The vfork test verifies that an
+exited child can be reaped with `wait(&status)`; the fork test additionally
+verifies two independently runnable children and blocking `wait(NULL)`.
+
+The concurrent process and NWM gates are:
+
+```sh
+make pa-fork-test
+make pa-memfd-test
+make pa-nwm-test
+```
+
+`pa-memfd-test` exercises the shared framebuffer backing primitives directly.
+`pa-nwm-test` builds the official NWM app and exercises its Sv32 event loop.
+`nwm-sdl` is the interactive SDL entry point; the official app finder still
+expects its normal Navy child-app bundle in the ramdisk.
 
 ## Strict NEMU Alignment Rule
 
@@ -815,10 +828,13 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 ## Notes For Next Session
 
 - Stage 8 core acceptance passes both locally (`make stage8-test`) and through
-  the real Navy hello paging path (`make pa-vme-test`). The PA4 process
-  prework now also passes `make pa-vfork-test` and `make pa-fd-test`; full
-  MENU/NWM acceptance is still open until blocking wait and concurrent
-  foreground processes are implemented. Full Stage 7/PA3 acceptance is still open until
+  the real Navy hello paging path (`make pa-vme-test`). PA4 process creation,
+  blocking wait, fd duplication, shared memfd mapping, and official NWM event
+  loop now pass `make pa-fork-test`, `make pa-memfd-test`,
+  `make pa-vfork-test`, `make pa-fd-test`, and `make pa-nwm-test`; full
+  interactive MENU/NWM acceptance remains open
+  until the normal child-app ramdisk and manual SDL window workflow are
+  verified. Full Stage 7/PA3 acceptance is still open until
   PAL/仙剑 reaches a visible scene.
 - SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
   AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,

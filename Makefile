@@ -60,7 +60,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vfork-test pa-fd-test pa-vme-test \
+  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl nwm-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vfork-test pa-fd-test pa-fork-test pa-memfd-test pa-nwm-test pa-vme-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -113,6 +113,9 @@ help:
 	@printf '%s\n' '  make pa-execve-args-test  Verify execve preserves argv across replacement'
 	@printf '%s\n' '  make pa-vfork-test    Verify child execve returns control to the parent'
 	@printf '%s\n' '  make pa-fd-test       Verify pipe, dup, and dup2 with per-process fd tables'
+	@printf '%s\n' '  make pa-fork-test     Verify concurrent fork/exec/exit/wait with two children'
+	@printf '%s\n' '  make pa-memfd-test    Verify memfd_create, ftruncate, mmap, and munmap'
+	@printf '%s\n' '  make pa-nwm-test      Build and run official NWM event loop under Sv32'
 	@printf '%s\n' '  make pa-vme-test     Build and run Navy hello under Nanos-lite Sv32 paging'
 	@printf '%s\n' '  make runner-test     Run tools/run-tests.sh'
 	@printf '%s\n' '  make cmake-build     Configure and build with CMake'
@@ -225,6 +228,11 @@ pal-sdl: $(MEMU_SDL)
 	PAL_NANOS_DATA="$(PAL_NANOS_DATA)" \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU_SDL) $(PA_HOME)
 
+nwm-sdl: $(MEMU_SDL)
+	PA_NANOS_INTERACTIVE=1 PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 \
+	PA_NANOS_APP_NAME=nwm PA_NANOS_APP_DIR=apps/nwm PA_NANOS_APP_PATH=/bin/nwm \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU_SDL) $(PA_HOME)
+
 smoke: $(MEMU)
 	/bin/sh tests/smoke.sh $(MEMU)
 
@@ -324,6 +332,21 @@ pa-vfork-test: $(MEMU)
 pa-fd-test: $(MEMU)
 	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_MAX_INSTR=10000000 \
 	PA_NANOS_APP_NAME=fd-test PA_NANOS_APP_DIR=tests/fd-test PA_NANOS_APP_PATH=/bin/fd-test \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-fork-test: $(MEMU)
+	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_MAX_INSTR=10000000 \
+	PA_NANOS_APP_NAME=fork-test PA_NANOS_APP_DIR=tests/fork-test PA_NANOS_APP_PATH=/bin/fork-test \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-memfd-test: $(MEMU)
+	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_MAX_INSTR=10000000 \
+	PA_NANOS_APP_NAME=memfd-test PA_NANOS_APP_DIR=tests/memfd-test PA_NANOS_APP_PATH=/bin/memfd-test \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-nwm-test: $(MEMU)
+	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_MAX_INSTR=5000000 \
+	PA_NANOS_APP_NAME=nwm PA_NANOS_APP_DIR=apps/nwm PA_NANOS_APP_PATH=/bin/nwm \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
 
 pa-vme-test: $(MEMU)

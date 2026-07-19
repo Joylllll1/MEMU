@@ -44,8 +44,9 @@ int main() {
 
     (nanos / "src/proc.c").write_text(
         r'''#include <proc.h>
+#include <string.h>
 
-#define MAX_NR_PROC 4
+#define MAX_NR_PROC 16
 
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
@@ -60,6 +61,8 @@ static enum {
 static PCB *wait_parent[MAX_NR_PROC];
 static int proc_pid[MAX_NR_PROC];
 static uintptr_t proc_exit_status[MAX_NR_PROC];
+static bool wait_pending[MAX_NR_PROC];
+static uintptr_t wait_status[MAX_NR_PROC];
 static int next_pid = 1;
 
 void switch_boot_pcb() {
@@ -108,9 +111,67 @@ int process_slot(void) {
 void process_clone_fds(int parent_index, int child_index);
 void process_release_fds(int process_index);
 
-int process_wait(int *status) {
-  if (!process_is_managed()) return -1;
-  int parent_index = proc_index(current);
+typedef uint32_t ProcessPte;
+#define PROCESS_PTE_V 0x01u
+#define PROCESS_PTE_W 0x04u
+#define PROCESS_USER_VA_START 0x40000000u
+#define PROCESS_USER_VA_END 0x80000000u
+
+static void process_clone_as(PCB *parent, PCB *child) {
+  if (parent->as.ptr == NULL) {
+    child->as = parent->as;
+    child->max_brk = parent->max_brk;
+    return;
+  }
+  protect(&child->as);
+  ProcessPte *parent_root = (ProcessPte *)parent->as.ptr;
+  for (uintptr_t vpn1 = PROCESS_USER_VA_START >> 22;
+       vpn1 < PROCESS_USER_VA_END >> 22; vpn1++) {
+    ProcessPte root_entry = parent_root[vpn1];
+    if ((root_entry & PROCESS_PTE_V) == 0) continue;
+    ProcessPte *parent_table =
+        (ProcessPte *)((root_entry >> 10) << 12);
+    for (uintptr_t vpn0 = 0; vpn0 < 1024; vpn0++) {
+      ProcessPte leaf = parent_table[vpn0];
+      if ((leaf & PROCESS_PTE_V) == 0) continue;
+      void *copy = new_page(1);
+      void *source = (void *)((leaf >> 10) << 12);
+      memcpy(copy, source, PGSIZE);
+      uintptr_t va = (vpn1 << 22) | (vpn0 << 12);
+      map(&child->as, (void *)va, copy,
+          (leaf & PROCESS_PTE_W) ? MMAP_READ | MMAP_WRITE : MMAP_READ);
+    }
+  }
+  child->max_brk = parent->max_brk;
+}
+
+static bool process_copy_to_user(PCB *process, uintptr_t va,
+                                 const void *src, size_t len) {
+  if (process->as.ptr == NULL) {
+    memcpy((void *)va, src, len);
+    return true;
+  }
+  ProcessPte *root = (ProcessPte *)process->as.ptr;
+  const uint8_t *bytes = (const uint8_t *)src;
+  while (len > 0) {
+    if (va < PROCESS_USER_VA_START || va >= PROCESS_USER_VA_END) return false;
+    ProcessPte root_entry = root[(va >> 22) & 0x3ff];
+    if ((root_entry & PROCESS_PTE_V) == 0) return false;
+    ProcessPte *table = (ProcessPte *)((root_entry >> 10) << 12);
+    ProcessPte leaf = table[(va >> 12) & 0x3ff];
+    if ((leaf & PROCESS_PTE_V) == 0) return false;
+    uintptr_t offset = va & (PGSIZE - 1);
+    size_t chunk = PGSIZE - offset;
+    if (chunk > len) chunk = len;
+    memcpy((uint8_t *)((leaf >> 10) << 12) + offset, bytes, chunk);
+    va += chunk;
+    bytes += chunk;
+    len -= chunk;
+  }
+  return true;
+}
+
+static int process_reap(int parent_index, int *status) {
   for (int i = 0; i < MAX_NR_PROC; i++) {
     if (proc_state[i] != PROC_EXITED || proc_index(wait_parent[i]) != parent_index) {
       continue;
@@ -124,6 +185,49 @@ int process_wait(int *status) {
     return pid;
   }
   return -1;
+}
+
+Context *process_wait(Context *prev, int *status) {
+  if (!process_is_managed()) {
+    prev->GPRx = (uintptr_t)-1;
+    return prev;
+  }
+  int parent_index = proc_index(current);
+  int pid = process_reap(parent_index, status);
+  if (pid >= 0) {
+    prev->GPRx = (uintptr_t)pid;
+    return prev;
+  }
+
+  bool has_child = false;
+  for (int i = 0; i < MAX_NR_PROC; i++) {
+    if (proc_state[i] != PROC_UNUSED && wait_parent[i] == current) {
+      has_child = true;
+      break;
+    }
+  }
+  if (!has_child) {
+    prev->GPRx = (uintptr_t)-1;
+    return prev;
+  }
+
+  current->cp = context_slot(current);
+  *current->cp = *prev;
+  wait_pending[parent_index] = true;
+  wait_status[parent_index] = (uintptr_t)status;
+  proc_state[parent_index] = PROC_BLOCKED;
+  PCB *next = next_runnable();
+  if (next == NULL) {
+    wait_pending[parent_index] = false;
+    wait_status[parent_index] = 0;
+    proc_state[parent_index] = PROC_RUNNING;
+    prev->GPRx = (uintptr_t)-1;
+    return prev;
+  }
+  current = next;
+  int next_index = proc_index(next);
+  proc_state[next_index] = PROC_RUNNING;
+  return next->cp;
 }
 
 Context *process_schedule(Context *prev) {
@@ -145,9 +249,8 @@ Context *process_schedule(Context *prev) {
   return next->cp;
 }
 
-/* PA's current Nanos-lite syscall surface exposes one fork number and its
- * vfork users immediately exec. Share the address space until execve, then
- * return to the blocked parent when the child exits. */
+/* PA's current Nanos-lite syscall surface exposes one fork number. Clone the
+ * user address space so parent and child can run independently before execve. */
 Context *process_fork(Context *parent_ctx) {
   if (!process_is_managed()) return parent_ctx;
   int parent_index = proc_index(current);
@@ -166,19 +269,22 @@ Context *process_fork(Context *parent_ctx) {
   PCB *parent = current;
   PCB *child = &pcb[child_index];
   process_clone_fds(parent_index, child_index);
+  process_clone_as(parent, child);
   parent->cp = context_slot(parent);
   *parent->cp = *parent_ctx;
   proc_pid[child_index] = next_pid++;
+  proc_exit_status[child_index] = 0;
+  wait_pending[child_index] = false;
+  wait_status[child_index] = 0;
   child->cp = context_slot(child);
   *child->cp = *parent_ctx;
   parent->cp->GPRx = (uintptr_t)proc_pid[child_index];
   child->cp->GPRx = 0;
   proc_state[child_index] = PROC_RUNNABLE;
   wait_parent[child_index] = parent;
-  proc_state[parent_index] = PROC_BLOCKED;
-  current = child;
-  proc_state[child_index] = PROC_RUNNING;
-  return child->cp;
+  child->cp->pdir = child->as.ptr;
+  proc_state[parent_index] = PROC_RUNNING;
+  return parent->cp;
 }
 
 Context *process_exit(Context *prev, uintptr_t status) {
@@ -189,7 +295,20 @@ Context *process_exit(Context *prev, uintptr_t status) {
   proc_state[index] = PROC_EXITED;
   PCB *parent = wait_parent[index];
   int parent_index = proc_index(parent);
-  if (parent_index >= 0 && proc_state[parent_index] == PROC_BLOCKED) {
+  if (parent_index >= 0 && proc_state[parent_index] == PROC_BLOCKED &&
+      wait_pending[parent_index]) {
+    int child_status = (int)proc_exit_status[index];
+    if (wait_status[parent_index] != 0) {
+      process_copy_to_user(parent, wait_status[parent_index], &child_status,
+                           sizeof(child_status));
+    }
+    parent->cp->GPRx = (uintptr_t)proc_pid[index];
+    wait_pending[parent_index] = false;
+    wait_status[parent_index] = 0;
+    wait_parent[index] = NULL;
+    proc_pid[index] = 0;
+    proc_exit_status[index] = 0;
+    proc_state[index] = PROC_UNUSED;
     proc_state[parent_index] = PROC_RUNNABLE;
   }
   PCB *next = next_runnable();
@@ -939,6 +1058,10 @@ void naive_execve(const char *filename, const char **argv, const char **envp) {
 #define SYS_pipe 20
 #define SYS_dup 21
 #define SYS_dup2 22
+#define SYS_ftruncate 23
+#define SYS_mmap 24
+#define SYS_munmap 25
+#define SYS_memfd_create 26
 
 int fs_open(const char *pathname, int flags, int mode);
 size_t fs_read(int fd, void *buf, size_t len);
@@ -950,15 +1073,18 @@ void naive_uload(PCB *pcb, const char *filename);
 void naive_execve(const char *filename, const char **argv, const char **envp);
 bool process_is_managed(void);
 int process_slot(void);
+void *new_page(size_t nr_page);
+void map(AddrSpace *as, void *vaddr, void *paddr, int prot);
 Context *process_schedule(Context *prev);
 Context *process_fork(Context *parent_ctx);
 Context *process_exit(Context *prev, uintptr_t status);
-int process_wait(int *status);
+Context *process_wait(Context *prev, int *status);
 
-#define FD_TABLES 5
+#define FD_TABLES 17
 #define MAX_PROCESS_FDS 32
 #define MAX_PIPES 8
 #define PIPE_CAPACITY 4096
+#define MAX_MEMFDS 8
 
 typedef long ssize_t;
 
@@ -968,6 +1094,7 @@ enum {
   FD_FILE,
   FD_PIPE_READ,
   FD_PIPE_WRITE,
+  FD_MEMFD,
 };
 
 typedef struct {
@@ -985,9 +1112,18 @@ typedef struct {
   uint8_t data[PIPE_CAPACITY];
 } Pipe;
 
+typedef struct {
+  int used;
+  size_t size;
+  size_t capacity;
+  uint8_t *data;
+} MemFd;
+
 static FdEntry fd_table[FD_TABLES][MAX_PROCESS_FDS];
 static int fd_initialized[FD_TABLES];
 static Pipe pipes[MAX_PIPES];
+static MemFd memfds[MAX_MEMFDS];
+static uintptr_t mmap_next[FD_TABLES];
 
 static int fd_owner(void) {
   int slot = process_slot();
@@ -1126,6 +1262,58 @@ static ssize_t pipe_write(Pipe *pipe, const void *buf, size_t len) {
   return (ssize_t)actual;
 }
 
+static int memfd_create_slot(void) {
+  for (int i = 0; i < MAX_MEMFDS; i++) {
+    if (!memfds[i].used) {
+      memfds[i] = (MemFd){.used = 1};
+      return i;
+    }
+  }
+  return -1;
+}
+
+static int memfd_resize(int memfd, size_t size) {
+  if (memfd < 0 || memfd >= MAX_MEMFDS || !memfds[memfd].used) return -1;
+  size_t capacity = (size + PGSIZE - 1) & ~(size_t)(PGSIZE - 1);
+  if (capacity > memfds[memfd].capacity) {
+    uint8_t *data = (uint8_t *)new_page(capacity / PGSIZE);
+    if (memfds[memfd].data != NULL && memfds[memfd].size != 0) {
+      memcpy(data, memfds[memfd].data, memfds[memfd].size);
+    }
+    memfds[memfd].data = data;
+    memfds[memfd].capacity = capacity;
+  }
+  memfds[memfd].size = size;
+  return 0;
+}
+
+static int fd_memfd(int slot, int fd) {
+  fd_init(slot);
+  if (fd < 0 || fd >= MAX_PROCESS_FDS ||
+      fd_table[slot][fd].kind != FD_MEMFD) return -1;
+  return fd_table[slot][fd].target;
+}
+
+static int fd_ftruncate(int slot, int fd, size_t size) {
+  return memfd_resize(fd_memfd(slot, fd), size);
+}
+
+static void *fd_mmap(int slot, size_t length, int prot, int fd, size_t offset) {
+  int memfd = fd_memfd(slot, fd);
+  if (memfd < 0 || length == 0 || offset > memfds[memfd].size ||
+      length > memfds[memfd].size - offset) return (void *)-1;
+  size_t mapped = (length + PGSIZE - 1) & ~(size_t)(PGSIZE - 1);
+  uintptr_t base = mmap_next[slot];
+  if (base == 0) base = (current->max_brk + PGSIZE - 1) & ~(uintptr_t)(PGSIZE - 1);
+  if (base < 0x40000000u || base + mapped > 0x80000000u) return (void *)-1;
+  for (size_t page = 0; page < mapped; page += PGSIZE) {
+    map(&current->as, (void *)(base + page),
+        memfds[memfd].data + offset + page, prot);
+  }
+  mmap_next[slot] = base + mapped;
+  return (void *)base;
+}
+
 static ssize_t fd_read(int slot, int fd, void *buf, size_t len) {
   fd_init(slot);
   if (fd < 0 || fd >= MAX_PROCESS_FDS) return -1;
@@ -1135,6 +1323,12 @@ static ssize_t fd_read(int slot, int fd, void *buf, size_t len) {
     return entry.target == 0 ? (ssize_t)fs_read(0, buf, len) : -1;
   }
   if (entry.kind == FD_FILE) return (ssize_t)fs_read(entry.target, buf, len);
+  if (entry.kind == FD_MEMFD) {
+    MemFd *memfd = &memfds[entry.target];
+    size_t actual = len < memfd->size ? len : memfd->size;
+    memcpy(buf, memfd->data, actual);
+    return (ssize_t)actual;
+  }
   return -1;
 }
 
@@ -1148,6 +1342,12 @@ static ssize_t fd_write(int slot, int fd, const void *buf, size_t len) {
       (ssize_t)fs_write(entry.target, buf, len) : -1;
   }
   if (entry.kind == FD_FILE) return (ssize_t)fs_write(entry.target, buf, len);
+  if (entry.kind == FD_MEMFD) {
+    MemFd *memfd = &memfds[entry.target];
+    size_t actual = len < memfd->size ? len : memfd->size;
+    memcpy(memfd->data, buf, actual);
+    return (ssize_t)actual;
+  }
   return -1;
 }
 
@@ -1265,9 +1465,32 @@ Context *do_syscall(Context *c) {
       }
       break;
     }
-    case SYS_wait:
-      c->GPRx = process_wait((int *)a[1]);
+    case SYS_ftruncate:
+      c->GPRx = fd_ftruncate(fd_owner(), a[1], a[2]);
       break;
+    case SYS_mmap:
+      c->GPRx = (uintptr_t)fd_mmap(fd_owner(), a[1], MMAP_READ | MMAP_WRITE,
+                                   a[2], a[3]);
+      break;
+    case SYS_munmap:
+      c->GPRx = 0;
+      break;
+    case SYS_memfd_create:
+    {
+      int slot = fd_owner();
+      int memfd = memfd_create_slot();
+      int fd = fd_alloc(slot);
+      if (memfd < 0 || fd < 0) {
+        if (memfd >= 0) memfds[memfd].used = 0;
+        c->GPRx = -1;
+      } else {
+        fd_table[slot][fd] = (FdEntry){FD_MEMFD, memfd};
+        c->GPRx = fd;
+      }
+      break;
+    }
+    case SYS_wait:
+      return process_wait(c, (int *)a[1]);
     case SYS_brk:
       c->GPRx = mm_brk(a[1]);
       break;
@@ -1391,6 +1614,10 @@ void call_main(int argc, char **argv, char **envp) {
 #define SYS_pipe 20
 #define SYS_dup 21
 #define SYS_dup2 22
+#define SYS_ftruncate 23
+#define SYS_mmap 24
+#define SYS_munmap 25
+#define SYS_memfd_create 26
 
 typedef long ssize_t;
 typedef long off_t;
@@ -1494,6 +1721,29 @@ off_t _lseek(int fd, off_t offset, int whence) {
 int _gettimeofday(struct timeval *tv, struct timezone *tz) {
   (void)tz;
   return _syscall_(SYS_gettimeofday, (intptr_t)tv, 0, 0);
+}
+
+int _ftruncate(int fd, off_t length) {
+  return _syscall_(SYS_ftruncate, fd, length, 0);
+}
+
+int ftruncate(int fd, off_t length) {
+  return _ftruncate(fd, length);
+}
+
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  (void)addr; (void)prot; (void)flags;
+  return (void *)_syscall_(SYS_mmap, length, fd, offset);
+}
+
+int munmap(void *addr, size_t length) {
+  (void)addr; (void)length;
+  return (int)_syscall_(SYS_munmap, 0, 0, 0);
+}
+
+int memfd_create(const char *name, unsigned int flags) {
+  (void)name;
+  return (int)_syscall_(SYS_memfd_create, flags, 0, 0);
 }
 '''
 
@@ -1624,6 +1874,38 @@ def patch_libc(navy: Path) -> None:
             for line in text.splitlines()
         ) + "\n"
     libc_makefile.write_text(text, encoding="ascii")
+
+    (navy / "libs/libc/include/sys/mman.h").write_text(
+        r'''#ifndef MEMU_SYS_MMAN_H
+#define MEMU_SYS_MMAN_H
+
+#include <stddef.h>
+#include <sys/types.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define PROT_NONE 0
+#define PROT_READ 1
+#define PROT_WRITE 2
+#define PROT_EXEC 4
+#define MAP_SHARED 1
+#define MAP_PRIVATE 2
+#define MAP_FAILED ((void *)-1)
+
+void *mmap(void *, size_t, int, int, int, off_t);
+int munmap(void *, size_t);
+int memfd_create(const char *, unsigned int);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+''',
+        encoding="ascii",
+    )
 
     sysexits = navy / "libs/libc/include/sysexits.h"
     if not sysexits.exists() and not sysexits.is_symlink():

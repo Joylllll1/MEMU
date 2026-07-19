@@ -60,6 +60,8 @@ fingerprint="$({ cat "$0" \
       "${script_dir}/mkbin/convert_slides.py" \
       "${script_dir}/mkbin/vfork-test.c" \
       "${script_dir}/mkbin/vfork-child.c" \
+      "${script_dir}/mkbin/fork-test.c" \
+      "${script_dir}/mkbin/memfd-test.c" \
       "${script_dir}/mkbin/fd-test.c" \
       "${script_dir}/prepare-pal-data.py"; \
     echo "${pa_home}"; } | cksum)"
@@ -159,6 +161,33 @@ include $(NAVY_HOME)/Makefile
 MAKEEOF
 fi
 
+if [ "${app_name}" = "fork-test" ]; then
+  mkdir -p "${navy_home}/tests/fork-test"
+  cp "${script_dir}/mkbin/fork-test.c" "${navy_home}/tests/fork-test/"
+  cat > "${navy_home}/tests/fork-test/Makefile" << 'MAKEEOF'
+NAME = fork-test
+SRCS = fork-test.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+  mkdir -p "${navy_home}/tests/vfork-child"
+  cp "${script_dir}/mkbin/vfork-child.c" "${navy_home}/tests/vfork-child/"
+  cat > "${navy_home}/tests/vfork-child/Makefile" << 'MAKEEOF'
+NAME = vfork-child
+SRCS = vfork-child.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
+if [ "${app_name}" = "memfd-test" ]; then
+  mkdir -p "${navy_home}/tests/memfd-test"
+  cp "${script_dir}/mkbin/memfd-test.c" "${navy_home}/tests/memfd-test/"
+  cat > "${navy_home}/tests/memfd-test/Makefile" << 'MAKEEOF'
+NAME = memfd-test
+SRCS = memfd-test.c
+include $(NAVY_HOME)/Makefile
+MAKEEOF
+fi
+
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
@@ -228,6 +257,10 @@ case "${app_dir}" in
       ramdisk_tests="dummy vfork-child vfork-test"
     elif [ "${app_name}" = "fd-test" ]; then
       ramdisk_tests="dummy fd-test"
+    elif [ "${app_name}" = "fork-test" ]; then
+      ramdisk_tests="dummy vfork-child fork-test"
+    elif [ "${app_name}" = "memfd-test" ]; then
+      ramdisk_tests="dummy memfd-test"
     fi
     ;;
   *)
@@ -249,6 +282,8 @@ if [ "${app_name}" = "bird" ]; then
 else
   PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/${app_dir}" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
   if [ "${app_name}" = "vfork-test" ]; then
+    PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/tests/vfork-child" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
+  elif [ "${app_name}" = "fork-test" ]; then
     PATH="${shim_dir}:$PATH" make -s -C "${navy_home}/tests/vfork-child" ISA=riscv32 NAVY_HOME="${navy_home}" ${navy_vme_arg} install
   fi
 fi
@@ -379,6 +414,37 @@ case "${app_name}" in
     require_output "fd-test: dup2-data"
     require_output "fd-test: PASS"
     echo "pipe and fd duplication OK"
+    ;;
+  fork-test)
+    require_output "fork-test: parent-before"
+    require_output "fork-test: parent-after-first pid=2"
+    require_output "fork-test: parent-after-second pid=3"
+    require_output "fork-test: waited=2,3"
+    if [ "$(grep -c 'vfork-test: child-running' "${work_root}/run-nanos.log")" -ne 2 ]; then
+      echo "FAIL fork-test: expected two concurrently created children"
+      sed -n '1,160p' "${work_root}/run-nanos.log"
+      exit 1
+    fi
+    if grep -q "fork-test: .*failed\|fork-test: exec-failed" "${work_root}/run-nanos.log"; then
+      echo "FAIL fork-test: child creation or exec failed"
+      sed -n '1,160p' "${work_root}/run-nanos.log"
+      exit 1
+    fi
+    echo "concurrent fork/exec/exit/wait OK"
+    ;;
+  nwm)
+    require_output "Nanos-lite boot"
+    if grep -q "MEMU panic\|page fault\|Unhandled syscall\|illegal instruction" "${work_root}/run-nanos.log"; then
+      echo "FAIL nwm: runtime reported a fatal emulator or syscall error"
+      sed -n '1,160p' "${work_root}/run-nanos.log"
+      exit 1
+    fi
+    require_output "instruction limit reached"
+    echo "NWM boots and runs its event loop under Sv32"
+    ;;
+  memfd-test)
+    require_output "memfd-test: values=12345678,9abcdef0"
+    echo "memfd and mmap compatibility OK"
     ;;
   bird)
     if grep -q "instruction limit reached" "${work_root}/run-nanos.log"; then

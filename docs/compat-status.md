@@ -69,12 +69,15 @@ Sv32 app coverage is additional follow-up work.
 | Nanos-lite execve | OS | pass | 2026-07-17 | `make pa-execve-test`; SYS_execve handler loads new ELF and replaces current program; execve-test calls execve("/bin/hello") and hello runs successfully |
 | Nanos-lite execve argv/envp | OS | pass | 2026-07-18 | `make pa-execve-args-test`; PA's `tests/exec-test` receives `argv[1] = 1`, then `argv[1] = 2` after replacement, proving the temporary loader builds a new argc/argv/envp stack |
 | Nanos-lite vfork-style child exec/return/wait | OS/PA4 prework | pass | 2026-07-19 | `make pa-vfork-test`; a finite child is created, execve replaces it, child exit restores the parent's saved stack/context, and the parent reaps `waited pid=2 status=0` |
+| Nanos-lite concurrent fork/exec/exit/wait | OS/PA4 prework | pass | 2026-07-19 | `make pa-fork-test`; parent remains runnable, creates PID 2 and 3 with independent copied address spaces, both children exec and exit, and blocking waits reap them |
+| Nanos-lite shared memfd/mmap | PA4/Navy | pass | 2026-07-19 | `make pa-memfd-test`; memfd_create, ftruncate, mmap, and munmap are exercised by a real Navy libc app under Sv32 |
+| Official NWM event loop | PA4/Navy | pass | 2026-07-19 | `make pa-nwm-test`; official `apps/nwm` builds, boots under Nanos-lite VME, and runs to the bounded instruction limit without emulator or syscall faults |
 | PAL / 仙剑 | Navy/miniSDL | blocked | 2026-07-18 | `make pa-pal-test` with `.local/pal-data` stages 31 case-normalized resource files, writable `sdlpal.cfg` and five save slots, reaches the bounded rendering loop, and wires Navy `/dev/sbctl`/`/dev/sb` PCM to MEMU SDL audio. PAL's DOSBox OPL tables are now explicitly initialized for the Nanos-lite guest and the dummy-audio run receives non-zero PCM; manual `make pal-sdl` display/speaker verification still needs a host device |
 | yield-os | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `am-kernels/kernels/yield-os` alternates A/B under CTE context switching |
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
 | virtual memory smoke | PA4 | pass | 2026-07-17 | `make stage8-test` runs mp-os: two processes share user VA 0x40000000 mapped to different physical pages under real Sv32, timer preemption yields 16 alternating A/B timeslices, and vm-fault verifies the page-fault diagnostic |
 | Navy hello under Sv32 VME | PA4 | pass | 2026-07-17 | `make pa-vme-test`; Nanos-lite enables HAS_VME, vme_init turns on satp, loader map()s the ELF and an 8-page user stack into USER_SPACE at 0x40000000, and full-libc hello prints through printf under paging |
-| PA4 final MENU/NWM foreground switching | PA4 | open | 2026-07-19 | Minimal vfork-style child exec, parent resume, pipe/dup/dup2, and exited-child wait/reap now pass; the GitBook final demo still needs blocking wait semantics and multiple concurrent Navy apps, so this integrated desktop workflow is not claimed complete |
+| PA4 final MENU/NWM foreground switching | PA4 | open | 2026-07-19 | Process/fd/wait/memfd foundations and the official NWM event loop pass; the final desktop gate still needs the normal bundled child Navy applications plus manual SDL spawn/focus/window verification |
 
 ## Run Notes
 
