@@ -59,6 +59,7 @@ static enum {
 } proc_state[MAX_NR_PROC];
 static PCB *wait_parent[MAX_NR_PROC];
 static int proc_pid[MAX_NR_PROC];
+static uintptr_t proc_exit_status[MAX_NR_PROC];
 static int next_pid = 1;
 
 void switch_boot_pcb() {
@@ -106,6 +107,24 @@ int process_slot(void) {
 
 void process_clone_fds(int parent_index, int child_index);
 void process_release_fds(int process_index);
+
+int process_wait(int *status) {
+  if (!process_is_managed()) return -1;
+  int parent_index = proc_index(current);
+  for (int i = 0; i < MAX_NR_PROC; i++) {
+    if (proc_state[i] != PROC_EXITED || proc_index(wait_parent[i]) != parent_index) {
+      continue;
+    }
+    if (status != NULL) *status = (int)proc_exit_status[i];
+    int pid = proc_pid[i];
+    wait_parent[i] = NULL;
+    proc_pid[i] = 0;
+    proc_exit_status[i] = 0;
+    proc_state[i] = PROC_UNUSED;
+    return pid;
+  }
+  return -1;
+}
 
 Context *process_schedule(Context *prev) {
   if (!process_is_managed()) return prev;
@@ -162,10 +181,11 @@ Context *process_fork(Context *parent_ctx) {
   return child->cp;
 }
 
-Context *process_exit(Context *prev) {
+Context *process_exit(Context *prev, uintptr_t status) {
   if (!process_is_managed()) return NULL;
   int index = proc_index(current);
   process_release_fds(index);
+  proc_exit_status[index] = status;
   proc_state[index] = PROC_EXITED;
   PCB *parent = wait_parent[index];
   int parent_index = proc_index(parent);
@@ -932,7 +952,8 @@ bool process_is_managed(void);
 int process_slot(void);
 Context *process_schedule(Context *prev);
 Context *process_fork(Context *parent_ctx);
-Context *process_exit(Context *prev);
+Context *process_exit(Context *prev, uintptr_t status);
+int process_wait(int *status);
 
 #define FD_TABLES 5
 #define MAX_PROCESS_FDS 32
@@ -1189,7 +1210,7 @@ Context *do_syscall(Context *c) {
   switch (a[0]) {
     case SYS_exit:
     {
-      Context *next = process_exit(c);
+      Context *next = process_exit(c, a[1]);
       if (next != NULL) return next;
       exit_current(a[1]);
       break;
@@ -1244,6 +1265,9 @@ Context *do_syscall(Context *c) {
       }
       break;
     }
+    case SYS_wait:
+      c->GPRx = process_wait((int *)a[1]);
+      break;
     case SYS_brk:
       c->GPRx = mm_brk(a[1]);
       break;
@@ -1532,8 +1556,7 @@ int _unlink(const char *n) {
 }
 
 pid_t _wait(int *status) {
-  (void)status;
-  return -1;
+  return _syscall_(SYS_wait, (intptr_t)status, 0, 0);
 }
 
 clock_t _times(void *buf) {

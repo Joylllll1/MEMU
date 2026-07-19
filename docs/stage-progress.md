@@ -64,8 +64,8 @@ changes.
   now present: per-process fd tables, bounded in-memory pipes, `pipe`/`pipe2`,
   `dup`, `dup2`, and fd-aware `read`/`write`/`close` pass the real
   `make pa-fd-test` integration gate. The full desktop demo is still open
-  because `wait` and multiple concurrently runnable Navy window processes are
-  not implemented yet.
+  because blocking `wait` and multiple concurrently runnable Navy window
+  processes are not implemented yet.
 - PAL audio compatibility fix: the temporary Navy PAL build now explicitly
   initializes DOSBox OPL lookup tables instead of relying on guest C++ global
   constructors; a dummy-audio PAL run produces non-zero PCM at the MEMU audio
@@ -92,8 +92,9 @@ make pa-fd-test
 
 This real Nanos-lite/VME test verifies pipe data transfer, stdout redirection
 through `dup2`, and restoration through a duplicated serial fd. The pipe is a
-bounded nonblocking teaching implementation; scheduler-backed blocking and
-`wait` remain part of the later MENU/NWM integration.
+bounded nonblocking teaching implementation. The vfork test also verifies
+that an exited child can be reaped with `wait(&status)`; scheduler-backed
+blocking wait remains part of the later MENU/NWM integration.
 
 ## Strict NEMU Alignment Rule
 
@@ -816,8 +817,8 @@ tests/smoke/run_expr_generated.py ./build/memu tests/images/stage1-trap.bin
 - Stage 8 core acceptance passes both locally (`make stage8-test`) and through
   the real Navy hello paging path (`make pa-vme-test`). The PA4 process
   prework now also passes `make pa-vfork-test` and `make pa-fd-test`; full
-  MENU/NWM acceptance is still open until `wait` and concurrent foreground
-  processes are implemented. Full Stage 7/PA3 acceptance is still open until
+  MENU/NWM acceptance is still open until blocking wait and concurrent
+  foreground processes are implemented. Full Stage 7/PA3 acceptance is still open until
   PAL/仙剑 reaches a visible scene.
 - SDL/interactive polish (2026-07-17): the MEMU SDL keymap now covers the full
   AM key list (letters, digits, symbols) so typing-game, NSlider digits+G goto,

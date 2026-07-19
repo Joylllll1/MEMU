@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 int main(void) {
   puts("vfork-test: parent-before");
@@ -11,5 +12,8 @@ int main(void) {
     _exit(2);
   }
   printf("vfork-test: parent-after pid=%d\n", (int)pid);
+  int status = -1;
+  pid_t waited = wait(&status);
+  printf("vfork-test: waited pid=%d status=%d\n", (int)waited, status);
   return 0;
 }

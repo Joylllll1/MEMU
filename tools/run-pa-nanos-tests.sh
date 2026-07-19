@@ -366,6 +366,7 @@ case "${app_name}" in
     require_output "vfork-test: parent-before"
     require_output "vfork-test: child-running"
     require_output "vfork-test: parent-after pid="
+    require_output "vfork-test: waited pid=2 status=0"
     if grep -q "vfork-test: exec-failed" "${work_root}/run-nanos.log"; then
       echo "FAIL vfork-test: child execve failed"
       sed -n '1,120p' "${work_root}/run-nanos.log"
