@@ -41,6 +41,9 @@ changes.
 - Active strict gate: FCEUX bounded execution passes with public `nestest.nes`
   under `/Users/wjl/Projects/icspa2025/ICS-PA/fceux-am/nes/rom/`; the historical
   PA Box download URL currently returns a login page.
+- Final finite checklist: two host-interactive checks remain for the current
+  roadmap, `make pal-sdl` (PAL display/input/audio) and `make nwm-sdl` (NWM
+  child-window focus/switching). These are acceptance checks, not new stages.
 - Full PA3 now substantially complete: Nanos/Navy has the minimal
   direct-syscall hello-to-dummy smoke, official Navy libc/newlib hello smoke,
   NSlider multi-slide navigation with real generated slide assets and keyboard

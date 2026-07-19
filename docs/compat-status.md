@@ -28,6 +28,16 @@ confirm the opening scene responds to keyboard input and produces audio; deeper
 Sv32 app coverage is additional follow-up work.
 ```
 
+Finite release checklist: exactly two host-interactive checks remain for the
+current Stage 0-8 plus C1-C5 route:
+
+1. `make pal-sdl`: confirm PAL opening-scene display, keyboard input, and audio.
+2. `make nwm-sdl`: confirm NWM child-window creation, focus, and switching.
+
+These are host-device acceptance checks, not additional implementation stages.
+After both checks pass, the current roadmap is complete; later work is optional
+extension rather than unfinished scope.
+
 | Program | Layer | Status | Last Run | Notes |
 | --- | --- | --- | --- | --- |
 | MEMU hello-serial.bin | Device smoke | pass | 2026-07-15 | `make stage5-test BUILD_DIR=/private/tmp/memu-stage5-build` |
