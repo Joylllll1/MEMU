@@ -17,13 +17,25 @@ def main() -> None:
         "  canvas = nullptr;\n  fb = nullptr;\n",
         1,
     )
-    window_text = window_text.replace(
-        "void Window::update() {\n  if (read_fd != -1) {\n",
+    current_guard = (
         "void Window::update() {\n"
         "  if (read_fd != -1 && fb != nullptr && canvas != nullptr &&\n"
-        "      fw > 0 && fh > 0) {\n",
-        1,
+        "      fw > 0 && fh > 0) {\n"
     )
+    basic_guard = "void Window::update() {\n  if (read_fd != -1) {\n"
+    if current_guard in window_text:
+        window_text = window_text.replace(current_guard, basic_guard, 1)
+    elif basic_guard not in window_text:
+        raise SystemExit("unexpected NWM update guard")
+
+    copy_marker = "    } while (1);\n    int y;\n"
+    copy_guard = (
+        "    } while (1);\n"
+        "    if (fb == nullptr || canvas == nullptr || fw <= 0 || fh <= 0) return;\n"
+        "    int y;\n"
+    )
+    if copy_marker in window_text:
+        window_text = window_text.replace(copy_marker, copy_guard, 1)
     window.write_text(window_text, encoding="ascii")
     if autospawn and "extern intptr_t _syscall_" not in text:
         text = text.replace(
