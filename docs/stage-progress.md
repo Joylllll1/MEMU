@@ -109,8 +109,10 @@ make pa-nwm-test
 
 `pa-memfd-test` exercises the shared framebuffer backing primitives directly.
 `pa-nwm-test` builds the official NWM app and exercises its Sv32 event loop.
-`nwm-sdl` is the interactive SDL entry point; the official app finder still
-expects its normal Navy child-app bundle in the ramdisk.
+`nwm-sdl` is the interactive SDL entry point. Its temporary NWM/nterm build
+uses child-framebuffer dirty notifications, skips idle full-screen terminal
+updates, and batches contiguous framebuffer writes; the official app finder
+still expects its normal Navy child-app bundle in the ramdisk.
 
 ## Strict NEMU Alignment Rule
 

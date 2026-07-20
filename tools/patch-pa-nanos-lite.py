@@ -1319,7 +1319,9 @@ static void *fd_mmap(int slot, size_t length, int prot, int fd, size_t offset) {
   uintptr_t base = mmap_addr[slot][fd];
   if (base == 0) {
     base = mmap_next[slot];
-    if (base == 0) base = (current->max_brk + PGSIZE - 1) & ~(uintptr_t)(PGSIZE - 1);
+    /* Place memfd mappings well above the user heap so sbrk growth cannot
+     * overlap the shared framebuffer between NWM and its child apps. */
+    if (base == 0) base = 0x60000000u;
   }
   if (base < 0x40000000u || base + mapped > 0x80000000u) return (void *)-1;
   for (size_t page = 0; page < mapped; page += PGSIZE) {

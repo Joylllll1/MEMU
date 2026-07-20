@@ -60,7 +60,7 @@ SRCS := \
 
 .PHONY: all help clean distclean test smoke stage1-test monitor-test expr-test rv32i-test \
   stage4-test stage5-test stage6-test stage7-test stage8-test toolchain-test runner-test run monitor batch self-test dump-regs \
-  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl nwm-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vfork-test pa-fd-test pa-fork-test pa-memfd-test pa-nwm-test pa-nwm-child-test pa-vme-test \
+  mario bad-apple-sdl memu-sdl snake-sdl typing-sdl nslider-sdl bird-sdl pal-sdl nwm-sdl pa-cpu-tests pa-am-tests pa-app-tests pa-fceux-test pa-cte-os-tests pa-nanos-tests pa-nanos-libc-test pa-navy-ndl-test pa-ndl-test pa-bird-test pa-pal-probe pa-pal-test pa-execve-test pa-execve-args-test pa-vfork-test pa-fd-test pa-fork-test pa-memfd-test pa-nwm-test pa-nwm-child-test pa-nwm-interaction-test pa-vme-test \
   gen-stage1-image gen-rv32i-images gen-runtime-images gen-device-images gen-syscall-images gen-fs-images \
   gen-toolchain-images \
   cmake-configure cmake-build cmake-test
@@ -352,6 +352,11 @@ pa-nwm-test: $(MEMU)
 
 pa-nwm-child-test: $(MEMU)
 	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_NWM_AUTOSPAWN=1 PA_NANOS_MAX_INSTR=200000000 \
+	PA_NANOS_APP_NAME=nwm PA_NANOS_APP_DIR=apps/nwm PA_NANOS_APP_PATH=/bin/nwm \
+	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
+
+pa-nwm-interaction-test: $(MEMU)
+	PA_NANOS_VME=1 PA_NANOS_FULL_LIBC=1 PA_NANOS_NDL=1 PA_NANOS_NWM_INTERACTION=1 PA_NANOS_MAX_INSTR=200000000 \
 	PA_NANOS_APP_NAME=nwm PA_NANOS_APP_DIR=apps/nwm PA_NANOS_APP_PATH=/bin/nwm \
 	/bin/sh tools/run-pa-nanos-tests.sh $(MEMU) $(PA_HOME)
 

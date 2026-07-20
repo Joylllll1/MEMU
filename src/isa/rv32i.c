@@ -508,12 +508,14 @@ void rv32i_exec_once(MEMU *memu) {
         if (cpu->mtvec != 0) {
           cpu->mepc = this_pc;
           cpu->mcause = 11;
+          cpu->trap_depth++;
           dnpc = cpu->mtvec;
         } else {
           syscall_handle_ecall(memu, this_pc, snpc);
           dnpc = cpu->pc;
         }
       } else if (inst == UINT32_C(0x30200073)) {
+        if (cpu->trap_depth > 0) cpu->trap_depth--;
         dnpc = cpu->mepc;
       } else if ((inst & UINT32_C(0xfe007fff)) == UINT32_C(0x12000073)) {
         // sfence.vma: no TLB, page tables are walked on every access

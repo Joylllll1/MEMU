@@ -20,6 +20,7 @@ typedef struct {
   uint32_t mepc;
   uint32_t mcause;
   uint32_t satp;
+  uint32_t trap_depth;
 } CPUState;
 
 typedef struct {

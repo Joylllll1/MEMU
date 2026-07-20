@@ -22,6 +22,7 @@ void device_init(void);
 void device_set_trace(bool trace);
 void device_set_sdl(bool enabled);
 bool device_poll(void);
+void device_fb_dump_ppm(const char *path);
 uint32_t device_read_key_event(void);
 const char *device_key_name(uint32_t event);
 uint32_t device_key_code(const char *name);

@@ -208,6 +208,7 @@ static bool sdl_init_once(void) {
     fprintf(stderr, "MEMU SDL init failed: %s\n", SDL_GetError());
     return false;
   }
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
   sdl_window = SDL_CreateWindow("MEMU",
                                 SDL_WINDOWPOS_CENTERED,
                                 SDL_WINDOWPOS_CENTERED,
@@ -674,6 +675,24 @@ void device_init(void) {
 
 void device_set_trace(bool trace) {
   trace_device = trace;
+}
+
+void device_fb_dump_ppm(const char *path) {
+  FILE *fp = fopen(path, "wb");
+  if (fp == NULL) {
+    fprintf(stderr, "MEMU: could not open fb dump: %s\n", path);
+    return;
+  }
+  fprintf(fp, "P6\n%u %u\n255\n", MEMU_SCREEN_W, MEMU_SCREEN_H);
+  for (size_t i = 0; i < sizeof(fb); i += 4) {
+    uint8_t b = fb[i + 0];
+    uint8_t g = fb[i + 1];
+    uint8_t r = fb[i + 2];
+    fputc(r, fp);
+    fputc(g, fp);
+    fputc(b, fp);
+  }
+  fclose(fp);
 }
 
 void device_set_sdl(bool enabled) {

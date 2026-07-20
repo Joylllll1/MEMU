@@ -49,7 +49,13 @@ fi
 # Persistent per-configuration build cache: newlib and other Navy libraries
 # are only rebuilt from scratch when the patch tooling or PA_HOME changes.
 cache_root="${MEMU_PA_CACHE_DIR:-${HOME}/.cache/memu-pa}"
-work_root="${cache_root}/nanos-libc${full_libc}-ndl${ndl}-vme${vme}-${app_name}"
+nwm_child_apps="${PA_NANOS_NWM_APPS:-nterm}"
+nwm_cache_suffix=""
+if [ "${app_name}" = "nwm" ]; then
+  nwm_apps_tag="$(printf '%s' "${nwm_child_apps}" | tr ' /,' '___')"
+  nwm_cache_suffix="-apps${nwm_apps_tag}-auto${PA_NANOS_NWM_AUTOSPAWN:-0}"
+fi
+work_root="${cache_root}/nanos-libc${full_libc}-ndl${ndl}-vme${vme}-${app_name}${nwm_cache_suffix}"
 stamp_file="${work_root}/.memu-stamp"
 fingerprint="$({ cat "$0" \
       "${script_dir}/patch-pa-nemu-ioe.py" \
@@ -118,10 +124,20 @@ if [ "${app_name}" = "nwm" ]; then
   if [ "${PA_NANOS_NWM_AUTOSPAWN:-0}" = 1 ]; then
     nwm_patch_args="${nwm_patch_args} autospawn"
   fi
+  nwm_available_apps="/bin/nwm"
+  for child_app in ${nwm_child_apps}; do
+    nwm_available_apps="${nwm_available_apps},/bin/${child_app}"
+  done
+  if [ -n "${PA_NANOS_NWM_EXTRA_APPS:-}" ]; then
+    for extra_app in ${PA_NANOS_NWM_EXTRA_APPS}; do
+      nwm_available_apps="${nwm_available_apps},/bin/${extra_app}"
+    done
+  fi
   # Keep NWM's first frame safe while a child is still negotiating its size.
   # The optional autospawn argument is used only by the bounded child test.
   # shellcheck disable=SC2086
-  python3 "${script_dir}/patch-pa-nwm-test.py" ${nwm_patch_args}
+  MEMU_NWM_AVAILABLE_APPS="${nwm_available_apps}" \
+    python3 "${script_dir}/patch-pa-nwm-test.py" ${nwm_patch_args}
 fi
 
 if [ "${app_name}" = "ndl-test" ]; then
@@ -202,7 +218,6 @@ fi
 ramdisk_apps=""
 ramdisk_tests="dummy"
 key_events_file=""
-nwm_child_apps="${PA_NANOS_NWM_APPS:-nterm}"
 case "${app_dir}" in
   apps/*)
     ramdisk_apps="${app_dir#apps/}"
@@ -328,6 +343,13 @@ PATH="${shim_dir}:$PATH" make -s -C "${nanos_home}" \
 
 key_args=""
 case "${app_name}" in
+  nwm)
+    if [ "${PA_NANOS_NWM_INTERACTION:-0}" = 1 ]; then
+      key_events_file="${work_root}/key-events.txt"
+      printf 'kd RETURN\nku RETURN\n' > "${key_events_file}"
+      key_args="--key-events ${key_events_file}"
+    fi
+    ;;
   nslider)
     if [ "${interactive}" != 1 ]; then
       key_events_file="${work_root}/key-events.txt"
@@ -473,6 +495,16 @@ case "${app_name}" in
     if [ "${PA_NANOS_NWM_AUTOSPAWN:-0}" = 1 ]; then
       require_output "execve: /bin/nterm"
       echo "NWM fork/exec and child framebuffer path OK under Sv32"
+    elif [ "${PA_NANOS_NWM_INTERACTION:-0}" = 1 ]; then
+      require_output "execve: /bin/nterm"
+      nwm_checksums=$(grep 'framebuffer checksum' "${work_root}/run-nanos.log" | \
+        sed 's/.*checksum //' | sort -u | wc -l | tr -d ' ')
+      if [ "${nwm_checksums}" -lt 2 ]; then
+        echo "FAIL nwm: child terminal did not produce composited framebuffer updates"
+        sed -n '1,160p' "${work_root}/run-nanos.log"
+        exit 1
+      fi
+      echo "NWM Enter-to-spawn interaction OK under Sv32"
     else
       echo "NWM boots and runs its event loop under Sv32"
     fi

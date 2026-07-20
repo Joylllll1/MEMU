@@ -12,6 +12,9 @@ NDL_SOURCE = r'''#include <fcntl.h>
 #include <sys/time.h>
 #include <unistd.h>
 
+extern intptr_t _syscall_(intptr_t, intptr_t, intptr_t, intptr_t);
+#define SYS_yield 1
+
 static int evtdev = -1;
 static int fbdev = -1;
 static int nwm_app = 0;
@@ -59,11 +62,14 @@ void NDL_OpenCanvas(int *w, int *h) {
     canvas_h = *h;
     fbdev = 5;
     char buf[64];
-    int len = snprintf(buf, sizeof(buf), "%d %d", *w, *h);
+    int len = snprintf(buf, sizeof(buf), "%d %d\n", *w, *h);
     if (write(4, buf, (size_t)len) != len) return;
     while (1) {
       int nread = read(3, buf, sizeof(buf) - 1);
-      if (nread <= 0) continue;
+      if (nread <= 0) {
+        _syscall_(SYS_yield, 0, 0, 0);
+        continue;
+      }
       buf[nread] = '\0';
       if (strcmp(buf, "mmap ok") == 0) break;
     }
@@ -102,14 +108,29 @@ void NDL_DrawRect(uint32_t *pixels, int x, int y, int w, int h) {
   if (fbdev < 0 || pixels == NULL || w <= 0 || h <= 0) return;
   if (x < 0 || y < 0 || x + w > canvas_w || y + h > canvas_h) return;
   if (nwm_app) {
+    if (x == 0 && w == canvas_w) {
+      off_t offset = (off_t)y * canvas_w * (off_t)sizeof(uint32_t);
+      if (lseek(fbdev, offset, SEEK_SET) < 0) return;
+      if (write(fbdev, pixels, (size_t)w * h * sizeof(uint32_t)) < 0) return;
+      (void)write(4, "d\n", 2);
+      return;
+    }
     for (int row = 0; row < h; row++) {
       off_t offset = (off_t)((y + row) * canvas_w + x) * (off_t)sizeof(uint32_t);
       if (lseek(fbdev, offset, SEEK_SET) < 0) return;
       if (write(fbdev, pixels + row * w, (size_t)w * sizeof(uint32_t)) < 0) return;
     }
+    (void)write(4, "d\n", 2);
     return;
   }
   if (shadow == NULL) {
+    if (off_x + x == 0 && w == disp_w) {
+      off_t offset = (off_t)(off_y + y) * disp_w * (off_t)sizeof(uint32_t);
+      if (lseek(fbdev, offset, SEEK_SET) < 0) return;
+      if (write(fbdev, pixels, (size_t)w * h * sizeof(uint32_t)) < 0) return;
+      *(volatile uint32_t *)0xa0000104 = 1;
+      return;
+    }
     for (int row = 0; row < h; row++) {
       off_t offset = (off_t)((off_y + y + row) * disp_w + off_x + x) * (off_t)sizeof(uint32_t);
       if (lseek(fbdev, offset, SEEK_SET) < 0) return;

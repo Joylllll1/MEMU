@@ -25,6 +25,7 @@ typedef struct {
   bool trace_device;
   bool trace_syscall;
   bool sdl;
+  const char *fb_dump_path;
   uint64_t max_instr;
 } Options;
 
@@ -47,6 +48,7 @@ static void print_help(const char *argv0) {
   puts("  --trace-syscall     Print syscall number, arguments, and return value");
   puts("  --sdl               Show framebuffer in an SDL window and enable keyboard");
   puts("  --key-events PATH   Inject keyboard events; lines may include wait MS");
+  puts("  --fb-dump PATH      Write the final framebuffer to a PPM file");
   puts("  --max-instr N       Stop after N guest instructions");
 }
 
@@ -73,6 +75,7 @@ static Options parse_args(int argc, char **argv) {
     .trace_device = false,
     .trace_syscall = false,
     .sdl = false,
+    .fb_dump_path = NULL,
     .max_instr = 1000000,
   };
 
@@ -115,6 +118,9 @@ static Options parse_args(int argc, char **argv) {
       opt.trace_syscall = true;
     } else if (strcmp(argv[i], "--sdl") == 0) {
       opt.sdl = true;
+    } else if (strcmp(argv[i], "--fb-dump") == 0) {
+      MEMU_ASSERT(i + 1 < argc, "--fb-dump requires PATH");
+      opt.fb_dump_path = argv[++i];
     } else if (strcmp(argv[i], "--key-events") == 0) {
       MEMU_ASSERT(i + 1 < argc, "--key-events requires PATH");
       opt.key_events_path = argv[++i];
@@ -249,6 +255,10 @@ int main(int argc, char **argv) {
 
   if (memu.dump_regs) {
     cpu_dump_regs(&memu.cpu);
+  }
+
+  if (opt.fb_dump_path != NULL) {
+    device_fb_dump_ppm(opt.fb_dump_path);
   }
 
   if (opt.batch || opt.self_test || memu.state != MEMU_STATE_RUNNING) {

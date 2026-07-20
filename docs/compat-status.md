@@ -88,7 +88,7 @@ extension rather than unfinished scope.
 | thread-os / timer preemption smoke | PA4 | pass | 2026-07-15 | `make pa-cte-os-tests`; real `thread-os` prints Thread-A and Thread-B with MEMU timer interrupt injection |
 | virtual memory smoke | PA4 | pass | 2026-07-17 | `make stage8-test` runs mp-os: two processes share user VA 0x40000000 mapped to different physical pages under real Sv32, timer preemption yields 16 alternating A/B timeslices, and vm-fault verifies the page-fault diagnostic |
 | Navy hello under Sv32 VME | PA4 | pass | 2026-07-17 | `make pa-vme-test`; Nanos-lite enables HAS_VME, vme_init turns on satp, loader map()s the ELF and an 8-page user stack into USER_SPACE at 0x40000000, and full-libc hello prints through printf under paging |
-| PA4 final MENU/NWM foreground switching | PA4 | open | 2026-07-19 | The bounded NWM child regression now passes fork/exec and the shared framebuffer handshake; manual SDL spawn/focus/window verification remains open |
+| PA4 final MENU/NWM foreground switching | PA4 | open | 2026-07-20 | The bounded NWM child regression passes fork/exec and the shared framebuffer handshake. The temporary SDL path now uses child dirty notifications, idle nterm suppression, and contiguous framebuffer writes; manual spawn/focus/window verification remains open. |
 
 ## Run Notes
 

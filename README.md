@@ -1,37 +1,55 @@
 # MEMU
 
-MEMU is a teaching emulator inspired by the NEMU PA route. The first target is a small RV32I emulator that can grow toward the AM / Nanos-lite / Navy-apps stack.
+MEMU 的意思是 **My Emulator**。
 
-The current local scaffold is Stage 7: ramdisk, simple file system, and fs
-loader. Strict NEMU alignment has passed the real PA CPU gate and AM/CTE/IOE
-smoke gate, including interrupt/yield, audio/devscan, plus bounded real AM app
-runs including slider, typing-game, demo, snake, bad-apple, and LiteNES/Mario.
-A minimal real Nanos-lite + Navy-apps hello+dummy batch smoke also passes
-through `make pa-nanos-tests`, and the official Navy `tests/hello` now passes
-through real newlib libc with `make pa-nanos-libc-test`; full PA3 NDL/Navy app
-coverage is still active work. MEMU also has an SDL-backed LiteNES/Mario path with keyboard for local
-interactive play. MEMU's audio device is implemented and verified by AM
-audio/bad-apple paths, but this PA checkout's LiteNES/Mario source does not
-generate NES APU audio. FCEUX now has a bounded real-artifact smoke through
-`make pa-fceux-test` using public `nestest.nes`; the historical PA Box ROM URL
-currently returns a login page, so this does not claim a commercial game ROM.
+它是一个参考 NEMU PA 路线实现的教学型 RISC-V 模拟器项目，目标不是做一个尽可能大的模拟器，而是做一个**可逐步实现、可持续阅读、能跑真实 PA 工件**的小型系统。项目主线围绕 `riscv32` 展开，按 `CPU -> memory/MMIO -> AM -> Nanos-lite -> Navy-apps` 这条栈逐层推进。
 
-## Requirements
+MEMU 当前的本地教学主线已经实现到 **Stage 8**，覆盖 monitor、RV32I/RV32M/CSR、loader、MMIO 设备、syscall、ramdisk/filesystem、批处理、Sv32 虚存、基础多进程与定时器抢占。真实 PA 兼容性方面，CPU、AM/IOE、AM apps、Nanos-lite、部分 Navy-apps、Sv32/NWM 等关键 gate 已经打通；当前仍有少量宿主交互侧验收项，其中 `pal-sdl` 已可运行，`nwm-sdl` 仍是主要待确认项。
 
-On macOS, install:
+README 只负责说明这个仓库是什么、怎么开始、去哪里看权威状态。更细的阶段进度和兼容性记录请看：
 
-- Apple clang, usually from Xcode Command Line Tools: `xcode-select --install`
-- CMake 3.20 or newer
-- Ninja or Make
-- SDL2, only needed for `make mario`: `brew install sdl2`
+- [`docs/stage-progress.md`](docs/stage-progress.md)
+- [`docs/compat-status.md`](docs/compat-status.md)
+- [`docs/roadmap.md`](docs/roadmap.md)
 
-The RISC-V toolchain is optional in Stage 0. Later stages can build guest programs on Linux, Docker, Lima, UTM, or a remote machine, then copy the resulting raw or ELF artifacts into `tools/artifacts/` with notes about the exact source and build command.
+## 这个项目适合谁
 
-MEMU is intended to match NEMU PA outcomes. The generated tests in this repo are
-local scaffold checks; strict completion requires the NEMU-aligned targets in
-`docs/nemu-stage-acceptance.md` and `docs/nemu-strict-alignment.md`.
+如果你想要的是下面这几件事，MEMU 是合适的：
 
-## Build
+- 按照 NEMU PA 的系统路线，自己实现一个小型 emulator。
+- 在一个相对小的代码库里理解 CPU、内存、设备、OS runtime 和应用栈是怎么接起来的。
+- 用 macOS 作为主要宿主环境，同时逐步对接真实的 PA 构建产物。
+
+如果你只是想要一个“功能尽量全”的现成模拟器，这个仓库并不是那个方向。
+
+## 当前状态
+
+当前仓库可以分成两条线理解：
+
+- **教学主线**：Stage 0 到 Stage 8 已基本建立，适合按章节阅读和继续实验。
+- **兼容性主线**：真实 `cpu-tests`、AM tests、AM apps、Nanos-lite、Navy libc hello、NDL/miniSDL 的若干程序、Sv32 VME、NWM event loop/child path 等都已有通过记录。
+
+目前剩余的主要开放项不是新的大阶段，而是宿主相关的交互验收，例如：
+
+- `make pal-sdl`：PAL 已经可以运行，主要作为宿主交互路径的现成入口。
+- `make nwm-sdl`：运行 NWM 和 nterm 子窗口。子窗口通过 dirty 通知即时合成，空闲时不再整屏刷新；焦点切换仍需人工验收。
+
+因此，README 不再把自己写成阶段验收清单；以文档里的状态文件为准。
+
+## 环境要求
+
+在 macOS 上，至少准备：
+
+- Apple clang，通常来自 Xcode Command Line Tools：`xcode-select --install`
+- CMake 3.20+
+- Ninja 或 Make
+- SDL2：仅在运行 SDL 交互目标时需要，安装命令为 `brew install sdl2`
+
+RISC-V 交叉工具链不是最开始就必须的。本仓库支持把外部环境中构建出的 guest artifacts 拷回 MEMU 使用；后续如果要跑真实 PA 兼容性目标，通常需要一个可用的 `ICS-PA` checkout 和 `riscv64-unknown-elf-*` 工具链。
+
+## 快速开始
+
+先构建并跑本地回归：
 
 ```sh
 cmake -S . -B build
@@ -39,281 +57,112 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-If `cmake` is not installed yet, use the small fallback Makefile:
+日常使用时，Makefile 更直接：
 
 ```sh
 make
 make test
+make run
+make batch
+make help
 ```
 
-For day-to-day work, the Makefile also provides shortcuts:
+这些命令分别表示：
+
+- `make`：构建 `build/memu`
+- `make test`：运行本地回归测试集
+- `make run`：载入默认镜像并进入 monitor
+- `make batch`：不进入 monitor，直接批量运行默认镜像
+- `make help`：查看当前支持的快捷目标
+
+如果想做一次干净重建：
 
 ```sh
-make run             # enter monitor with the default Stage 1 image
-make batch           # run the default image to completion
-make dump-regs       # run the default image and print registers
-make self-test       # run the built-in smoke program
-make test            # run all Makefile tests
-make expr-test       # run generated expression tests
-make rv32i-test      # run the Stage 3 RV32I image suite
-make stage4-test     # run trap, max-instr, invalid instruction, and ELF tests
-make stage5-test     # run serial, timer, keyboard, and framebuffer tests
-make stage6-test     # run syscall write/brk/exit and batch-list tests
-make stage7-test     # run ramdisk, fs syscall, and fs loader tests
-make gen-toolchain-images # build the RV32 GCC toolchain ELF smoke image
-make toolchain-test  # build and run the RV32 GCC toolchain ELF smoke image
-make pa-cpu-tests    # build and run real PA cpu-tests; set PA_HOME if needed
-make pa-am-tests     # build and run real PA AM hello/timer/intr/kbd/display/devscan/audio tests
-make pa-app-tests    # build and run real PA slider/typing/demo/snake/bad-apple/LiteNES tests
-make pa-fceux-test   # build and run real PA FCEUX with a NES test ROM
-make pa-cte-os-tests # build and run real PA yield-os/thread-os CTE tests
-make pa-nanos-tests  # build and run real Nanos-lite with minimal Navy hello+dummy
-make pa-nanos-libc-test # build and run official Navy hello through real libc/newlib
-make mario           # build SDL MEMU and run LiteNES/Mario interactively
-make runner-test     # run the default passing artifact runner
-make cmake-test      # configure, build, and run CTest
+make clean
+make
 ```
 
-To run a different raw guest image:
+## 最常用的目标
+
+### 本地教学/回归目标
 
 ```sh
-make run IMAGE=path/to/program.bin
-make batch IMAGE=path/to/program.bin
-```
-
-## Run
-
-```sh
-./build/memu --help
-./build/memu --version
-./build/memu --self-test --batch
-./build/memu --image tests/images/stage1-trap.bin --batch --dump-regs
-./build/memu --image tests/images/stage1-trap.bin
-./build/memu --image tests/images/rv32i-add.bin --batch
-./build/memu --image tests/images/rv32i-load-store.bin --batch
-./build/memu --image tests/images/rv32i-branch-sum.bin --batch
-./build/memu --image tests/images/rv32i-jump.bin --batch
-./build/memu --image tests/images/good.bin --batch
-./build/memu --elf tests/images/good.elf --batch
-./build/memu --image tests/images/hello-serial.bin --batch
-./build/memu --image tests/images/timer.bin --batch
-./build/memu --image tests/images/keyboard.bin --batch --trace-device
-./build/memu --image tests/images/fb-clear.bin --batch --trace-device
-./build/memu --image tests/images/sys-write.bin --batch --trace-syscall
-./build/memu --batch-list tests/images/prog-a.bin tests/images/prog-b.bin
-./build/memu --ramdisk tests/images/ramdisk.img --run /bin/fs-cat --batch --trace-syscall
-./build/memu --elf tests/images/toolchain-basic.elf --batch
-```
-
-Stage 3 supports common RV32I integer instructions, plus the RV32M multiply and
-divide subset and minimal system instructions commonly emitted by RISC-V
-toolchains and AM code:
-
-- `lui`, `auipc`
-- `jal`, `jalr`
-- `addi`, `slti`, `sltiu`, `xori`, `ori`, `andi`, `slli`, `srli`, `srai`
-- `add`, `sub`, `sll`, `slt`, `sltu`, `xor`, `srl`, `sra`, `or`, `and`
-- `lb`, `lh`, `lw`, `lbu`, `lhu`
-- `sb`, `sh`, `sw`
-- `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`
-- `ebreak` as MEMU trap
-- `mul`, `mulh`, `mulhsu`, `mulhu`, `div`, `divu`, `rem`, `remu`
-- `fence`, `fence.i`, CSR read/write/set/clear, and `mret`
-
-`ebreak` is treated as a MEMU trap. If `a0 == 0`, MEMU reports `HIT GOOD TRAP`; otherwise it reports `HIT BAD TRAP`.
-
-The Stage 1 fixture can be regenerated with:
-
-```sh
-tools/mkbin/stage1_trap.py tests/images/stage1-trap.bin
-```
-
-The Stage 3 RV32I fixtures can be regenerated with:
-
-```sh
-make gen-rv32i-images
-```
-
-The Stage 4 runtime/loader fixtures can be regenerated with:
-
-```sh
-make gen-runtime-images
-```
-
-The Stage 5 device fixtures can be regenerated with:
-
-```sh
-make gen-device-images
-```
-
-The Stage 6 syscall fixtures can be regenerated with:
-
-```sh
-make gen-syscall-images
-```
-
-The Stage 7 ramdisk fixture can be regenerated with:
-
-```sh
-make gen-fs-images
-```
-
-The RV32 GCC toolchain ELF smoke fixture can be rebuilt with:
-
-```sh
-make gen-toolchain-images
+make expr-test
+make rv32i-test
+make stage4-test
+make stage5-test
+make stage6-test
+make stage7-test
+make stage8-test
 make toolchain-test
 ```
 
-This uses `riscv64-unknown-elf-gcc` with
-`-march=rv32im_zicsr_zifencei -mabi=ilp32`. It verifies a real ELF produced by
-the cross toolchain, but it is still a MEMU-local smoke test. NEMU-aligned
-completion still requires real `am-kernels` and AM application artifacts.
+这些目标大致对应：
 
-To run the real NEMU PA CPU test gate:
+- `expr-test`：表达式求值与 monitor 相关逻辑
+- `rv32i-test`：RV32I/RV32M/CSR 本地指令覆盖
+- `stage4-test`：loader、trap、ELF、运行时基础路径
+- `stage5-test`：serial/timer/keyboard/framebuffer 等设备
+- `stage6-test`：syscall 与 batch-list
+- `stage7-test`：ramdisk、filesystem、应用装载
+- `stage8-test`：Sv32、页故障、多进程样例与抢占脚手架
+- `toolchain-test`：真实交叉工具链生成的 ELF smoke
+
+### 真实 PA 兼容性目标
+
+如果本机 `PA_HOME` 不是默认位置，请显式传入：
 
 ```sh
 make pa-cpu-tests PA_HOME=/path/to/ICS-PA
-```
-
-On this machine the default PA checkout is
-`/Users/wjl/Projects/icspa2025/ICS-PA`, so `make pa-cpu-tests` works without
-passing `PA_HOME`.
-
-To run the real PA AM/IOE smoke gate:
-
-```sh
 make pa-am-tests PA_HOME=/path/to/ICS-PA
-```
-
-This builds `kernels/hello` plus `tests/am-tests` with `mainargs=h/t/i/k/v/d/a`.
-`h` exits by good trap; `t`, `i`, `k`, and `v` are long-running AM tests and are
-checked by bounded `--max-instr` runs plus expected timer, interrupt/yield,
-keyboard, and framebuffer/FPS output. `d` runs devscan with a temporary PA
-checkout patch for this checkout's missing riscv32-nemu
-`AM_GPU_MEMCPY`/`AM_GPU_RENDER` handlers and disk config stub. `a` patches the
-copied PA tree to enable NEMU MMIO audio and verifies that `AM_AUDIO_PLAY`
-reaches MEMU.
-
-To run the real PA AM app smoke gate:
-
-```sh
 make pa-app-tests PA_HOME=/path/to/ICS-PA
-```
-
-This builds and runs `slider`, `typing-game`, `demo` with `mainargs=1`, `snake`,
-`bad-apple`, and `litenes` with the bundled Mario ROM. These are long-running
-apps, so the test checks bounded runs for expected framebuffer/FPS/status
-output or sustained execution to the instruction limit.
-
-To run the real AM context-switching smoke gate:
-
-```sh
 make pa-cte-os-tests PA_HOME=/path/to/ICS-PA
-```
-
-This builds and runs `yield-os` and `thread-os` from `am-kernels`. MEMU injects
-a minimal machine timer interrupt when `mstatus.MIE` and `mtvec` are set, and
-the temporary PA checkout patch supplies riscv32-nemu `kcontext`, trap return
-context switching, timer/yield event mapping, and a single-core `atomic_xchg`.
-
-To run the minimal real Nanos-lite + Navy-apps smoke gate:
-
-```sh
 make pa-nanos-tests PA_HOME=/path/to/ICS-PA
+make pa-nanos-libc-test PA_HOME=/path/to/ICS-PA
+make pa-vme-test PA_HOME=/path/to/ICS-PA
 ```
 
-This copies the PA checkout to a temp directory, patches only the temp
-Nanos-lite/Navy trees, builds small Navy `tests/hello` and `tests/dummy`
-programs for `riscv32`, installs them into the ramdisk, and boots them through
-real Nanos-lite on MEMU. The scope validates loader, ramdisk, syscall dispatch,
-write/exit/yield, and a simple exit-to-next-program batch path.
-
-To exercise the official Navy hello with real libc/newlib instead of the small
-direct-syscall test program:
+此外，仓库里还有一些更细的兼容性目标，例如：
 
 ```sh
-make pa-nanos-libc-test PA_HOME=/path/to/ICS-PA
+make pa-navy-ndl-test
+make pa-ndl-test
+make pa-bird-test
+make pa-pal-test
+make pa-fork-test
+make pa-vfork-test
+make pa-fd-test
+make pa-memfd-test
+make pa-nwm-test
+make pa-nwm-child-test
 ```
 
-This builds the downloaded compiler-rt and Navy libc sources in the temp tree,
-links `printf` through libos syscalls, and runs until MEMU's instruction limit.
-The compatibility patch excludes three riscv32-incompatible newlib sources
-(`getpass.c`, `stat64r.c`, and `wcwidth.c`). NDL drawing apps, miniSDL apps,
-PAL, and `execve`-style program replacement have separate compatibility
-targets; use `make pa-pal-probe` for the PAL missing-resource probe and
-`make pa-pal-test PAL_NANOS_DATA=/path/to/legal/game-data` for licensed data.
+这些目标的最新通过情况，不要看 README，请看 [`docs/compat-status.md`](docs/compat-status.md)。
 
-To run Mario yourself in a window:
+## 交互目标
+
+如果你想直接在宿主机上打开窗口体验目前的图形路径，可以使用：
 
 ```sh
 make mario
+make bad-apple-sdl
+make snake-sdl
+make typing-sdl
+make nslider-sdl
+make bird-sdl
+make pal-sdl
+make nwm-sdl
 ```
 
-This builds an SDL-enabled `build/memu-sdl`, patches the copied PA AM audio glue,
-builds the PA LiteNES artifact from `PA_HOME`, and opens a 400x300 framebuffer
-window. On this machine `PA_HOME` defaults to
-`/Users/wjl/Projects/icspa2025/ICS-PA`; elsewhere pass it explicitly:
+说明：
 
-```sh
-make mario PA_HOME=/path/to/ICS-PA
-```
+- `make mario` 会构建 SDL 版本 MEMU，并运行 LiteNES/Mario。
+- `make pal-sdl` 与 `make nwm-sdl` 是当前路线里仍依赖人工宿主验收的目标；后者会显示带标题栏的 nterm 子窗口，并支持基本字符输入、退格和回车。
+- 关闭 SDL 窗口通常就是正常退出。
 
-Audio note: no Mario sound is expected with this LiteNES source. Its `psg.c`
-only implements controller strobe/read behavior for `0x4016`; it does not
-produce NES APU samples or call `AM_AUDIO_PLAY`. MEMU audio is still exercised
-by `make pa-am-tests` and the bad-apple app path.
+## Monitor 与运行方式
 
-Controls are:
-
-```text
-W/A/S/D or arrow keys: D-pad
-U: SELECT
-I: START
-J: A
-K: B
-Esc: escape key event
-```
-
-Close the SDL window to stop MEMU. If you want a bounded strict run for testing,
-use `MARIO_MAX_INSTR=N MARIO_STRICT=1 make mario`.
-
-`tools/run-tests.sh ./build/memu` runs the default passing raw and ELF artifacts.
-Bad trap, infinite loop, and invalid instruction fixtures are checked by
-`make stage4-test` rather than the default pass runner.
-
-Use `--trace` to print each executed guest instruction:
-
-```sh
-make batch IMAGE=tests/images/rv32i-branch-sum.bin RUN_ARGS=--trace
-```
-
-Use `--trace-device` to print MMIO reads and writes:
-
-```sh
-make batch IMAGE=tests/images/fb-clear.bin RUN_ARGS=--trace-device
-```
-
-Use `--trace-syscall` to print syscall number, arguments, and return value:
-
-```sh
-./build/memu --image tests/images/sys-write.bin --batch --trace-syscall
-```
-
-Use `--batch-list` to run raw user programs through the minimal batch runtime.
-Because it accepts a variable-length program list, put other options before it:
-
-```sh
-./build/memu --trace-syscall --batch-list tests/images/prog-a.bin tests/images/prog-b.bin
-```
-
-Use `--ramdisk` and `--run` to load a raw user program from MEMU SFS:
-
-```sh
-./build/memu --ramdisk tests/images/ramdisk.img --run /bin/fs-cat --batch
-```
-
-Without `--batch`, MEMU enters the monitor. The Stage 2 monitor supports:
+不带 `--batch` 时，MEMU 会进入 monitor。常用命令包括：
 
 - `help`, `q`, `c`, `si`
 - `info r`, `info w`
@@ -321,6 +170,76 @@ Without `--batch`, MEMU enters the monitor. The Stage 2 monitor supports:
 - `p EXPR`
 - `w EXPR`, `d N`
 
-Expressions support decimal and hex numbers, registers such as `$pc` and `$a1`,
-parentheses, `+ - * / == != &&`, unary `-`, and guest memory dereference with
-`*EXPR`.
+常见运行方式：
+
+```sh
+./build/memu --help
+./build/memu --version
+./build/memu --self-test --batch
+./build/memu --image tests/images/stage1-trap.bin
+./build/memu --image tests/images/stage1-trap.bin --batch --dump-regs
+./build/memu --elf tests/images/toolchain-basic.elf --batch
+./build/memu --ramdisk tests/images/ramdisk.img --run /bin/fs-cat --batch
+```
+
+调试开关：
+
+```sh
+./build/memu --image tests/images/sys-write.bin --batch --trace-syscall
+./build/memu --image tests/images/fb-clear.bin --batch --trace-device
+make batch IMAGE=tests/images/rv32i-branch-sum.bin RUN_ARGS=--trace
+```
+
+## 项目结构
+
+```text
+MEMU/
+|- README.md
+|- AGENTS.md
+|- Makefile
+|- CMakeLists.txt
+|- include/memu/         公共头文件
+|- src/cpu/              CPU 状态与执行循环
+|- src/isa/              RV32 指令译码与执行
+|- src/memory/           物理内存、MMU、Sv32
+|- src/device/           串口、定时器、键盘、帧缓冲、音频、磁盘
+|- src/os/               syscall、ramdisk、filesystem、batch runtime
+|- src/monitor/          monitor、表达式、watchpoint
+|- tests/                本地测试、镜像、脚本
+|- tools/                工件生成、PA patch、兼容性运行脚本
+`- docs/                 路线图、阶段文档、教材、兼容性记录
+```
+
+## 文档阅读顺序
+
+如果你是第一次认真看这个项目，建议按下面顺序读：
+
+1. [`docs/stage-progress.md`](docs/stage-progress.md)
+2. [`docs/roadmap.md`](docs/roadmap.md)
+3. [`docs/README.md`](docs/README.md)
+4. [`docs/textbook/README.md`](docs/textbook/README.md)
+5. 对应阶段的 `docs/textbook/chapter-*.md`
+6. 对应阶段的 `docs/stages/stage-XX-*.md`
+7. [`docs/nemu-stage-acceptance.md`](docs/nemu-stage-acceptance.md)
+8. [`docs/nemu-strict-alignment.md`](docs/nemu-strict-alignment.md)
+9. 相关 `src/` / `include/` 代码
+
+如果你是要继续做兼容性路线，再补充阅读：
+
+- [`docs/compat-status.md`](docs/compat-status.md)
+- [`docs/nemu-compatibility.md`](docs/nemu-compatibility.md)
+- [`docs/textbook/chapter-10-nemu-compatibility.md`](docs/textbook/chapter-10-nemu-compatibility.md)
+
+## 一些实现约束
+
+这个仓库默认坚持这些原则：
+
+- 使用 C11。
+- 保持代码小、直白、容易继续实验。
+- 优先围绕 `riscv32` 主线推进，不并行追多 ISA。
+- 本地 smoke pass 不等于 NEMU 对齐完成；严格状态以文档记录为准。
+- 外部 PA tree 会复制到临时目录或缓存目录后再 patch，不直接改你的原始 checkout。
+
+## License
+
+仓库里属于 MEMU 的源码和脚本按本项目自身约定维护；外部 PA、ROM、游戏资源或第三方工件不自动包含在“可自由再分发”的范围内。涉及 PAL、ROM、游戏数据等内容时，请只使用你有权合法持有的资源。

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #define MSTATUS_MIE UINT32_C(0x00000008)
+#define MSTATUS_MIE_NEMU UINT32_C(0x00020000)
 #define MCAUSE_MACHINE_TIMER_INTERRUPT UINT32_C(0x80000007)
 #define TIMER_INTERRUPT_INTERVAL UINT64_C(200000)
 
@@ -44,7 +45,11 @@ void memu_init(MEMU *memu) {
 
 static bool maybe_timer_interrupt(MEMU *memu) {
   CPUState *cpu = &memu->cpu;
-  if (cpu->mtvec == 0 || (cpu->mstatus & MSTATUS_MIE) == 0) {
+  if (cpu->mtvec == 0 ||
+      ((cpu->mstatus & (MSTATUS_MIE | MSTATUS_MIE_NEMU)) == 0)) {
+    return false;
+  }
+  if (cpu->trap_depth > 0) {
     return false;
   }
   if (memu->instr_count == 0 ||
@@ -54,6 +59,7 @@ static bool maybe_timer_interrupt(MEMU *memu) {
   cpu->mepc = cpu->pc;
   cpu->mcause = MCAUSE_MACHINE_TIMER_INTERRUPT;
   cpu->pc = cpu->mtvec;
+  cpu->trap_depth++;
   return true;
 }
 
